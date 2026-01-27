@@ -241,7 +241,7 @@ Tournament creation uses ConversationHandler:
 ### Project Structure
 
 ```
-champ/
+telegram-sport-event-bots/
 ├── tournament_bot/          # Tournament Bot module
 │   ├── __init__.py         # Package initialization
 │   ├── bot.py              # Main bot with handlers
