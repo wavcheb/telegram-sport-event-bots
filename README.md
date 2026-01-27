@@ -6,7 +6,7 @@ A comprehensive collection of Telegram bots for managing sports events and tourn
 
 ### 🏃 Sport Event Bot
 Telegram bot for organizing sports events (football/futsal) with participant registration, payment tracking, and attendance statistics.
-Use [existing bot](https://t.me/@nashfootballbot) @nashfootballbot or make own selfhosted bot.
+Use [existing bot](https://t.me/nashfootballbot) @nashfootballbot or make own selfhosted bot.
 
 **Key Features:**
 - Event management with date/time parsing
@@ -19,7 +19,7 @@ Use [existing bot](https://t.me/@nashfootballbot) @nashfootballbot or make own s
 
 ### 🏆 Tournament Bot
 Telegram bot for managing sports tournaments with automatic standings calculation using Round-Robin algorithm.
-Use [existing bot](https://t.me/@nashtournamentbot) @nashtournamentbot or make own selfhosted bot.
+Use [existing bot](https://t.me/nashtournamentbot) @nashtournamentbot or make own selfhosted bot.
 
 **Key Features:**
 - Round-Robin tournament system
