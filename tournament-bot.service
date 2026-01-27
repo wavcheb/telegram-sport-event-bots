@@ -1,0 +1,22 @@
+[Unit]
+Description=Telegram Tournament Bot
+After=network.target mysql.service
+Wants=mysql.service
+
+[Service]
+Type=simple
+User=YOUR_USERNAME
+Group=YOUR_USERNAME
+WorkingDirectory=/usr/local/tgbot
+ExecStart=/usr/local/tgbot/run_tournament_bot.sh
+Restart=always
+RestartSec=10
+StandardOutput=append:/usr/local/tgbot/tournament_bot/logs/systemd.log
+StandardError=append:/usr/local/tgbot/tournament_bot/logs/systemd.log
+
+# Security
+NoNewPrivileges=true
+PrivateTmp=true
+
+[Install]
+WantedBy=multi-user.target

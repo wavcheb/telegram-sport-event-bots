@@ -1,0 +1,10 @@
+# Core dependencies
+loguru>=0.7.0
+python-telegram-bot>=22.0,<23.0
+recurrent>=0.4.1
+
+# Database
+mysql-connector-python>=8.0.33
+
+# Date/Time parsing
+parsedatetime>=2.6

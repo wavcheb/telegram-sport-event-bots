@@ -1,0 +1,249 @@
+# Translations template for PROJECT.
+# Copyright (C) 2025 ORGANIZATION
+# This file is distributed under the same license as the PROJECT project.
+# root <wav@n-sun.ru>, 2025.
+msgid ""
+msgstr ""
+"Project-Id-Version: sportbot 2\n"
+"Report-Msgid-Bugs-To: \n"
+"POT-Creation-Date: 2025-04-07 16:24+0300\n"
+"PO-Revision-Date: 2025-04-07 16:24+0300\n"
+"Last-Translator: root <wav@n-sun.ru>\n"
+"Language-Team: Russian <gnu@d07.ru>\n"
+"Language: ru\n"
+"MIME-Version: 1.0\n"
+"Content-Type: text/plain; charset=utf-8\n"
+"Content-Transfer-Encoding: 8bit\n"
+"Generated-By: Babel 2.17.0\n"
+
+#: sport_event_bot2.py:72
+msgid "+ Apply for participation"
+msgstr "+ Записаться на участие"
+
+#: sport_event_bot2.py:73
+msgid "- Revoke application"
+msgstr "- Отозвать заявку"
+
+#: sport_event_bot2.py:74
+msgid "+ Apply friend or legioneer"
+msgstr "+ Добавить друга или легионера"
+
+#: sport_event_bot2.py:75
+msgid "- Remove last friend or legioneer"
+msgstr "- Удалить последнего друга/легионера"
+
+#: sport_event_bot2.py:76
+msgid "💰 Payment confirmed"
+msgstr "💰 Да заплатил я, заплатил!"
+
+#: sport_event_bot2.py:102 sport_event_bot2.py:366
+msgid "Payment confirmed!"
+msgstr "Записали вашу оплату!"
+
+#: sport_event_bot2.py:104 sport_event_bot2.py:363
+msgid "You must be registered for the event to confirm payment."
+msgstr "Вы должны быть участником события чтобы отмечать, Вашу оплату"
+
+#: sport_event_bot2.py:120
+msgid "en_US"
+msgstr "ru_RU"
+
+#: sport_event_bot2.py:161
+msgid "Error: Please provide an event description. Usage: /event_add TEXT"
+msgstr "Ошибка: добавьте описания события. Например: /event_add Футбол завтра в 06:30"
+
+#: sport_event_bot2.py:165
+msgid "Error: An active event already exists. Close it with /event_remove first."
+msgstr "Ошибка! Уже есть анонсированная игра, необходимо сперва её закрыть командой /event_remove"
+
+#: sport_event_bot2.py:179
+msgid "New event created"
+msgstr "Новое событие создано"
+
+#: sport_event_bot2.py:235
+msgid "Players limit"
+msgstr "Лимит игроков"
+
+#: sport_event_bot2.py:239
+msgid "Event date and time"
+msgstr "Дата и время события"
+
+#: sport_event_bot2.py:241
+msgid "Event time out"
+msgstr "Событие уже состоялось"
+
+#: sport_event_bot2.py:244
+msgid "Time left"
+msgstr "Времени осталось"
+
+#: sport_event_bot2.py:244
+msgid "days"
+msgstr "дней"
+
+#: sport_event_bot2.py:244
+msgid "and"
+msgstr "и"
+
+#: sport_event_bot2.py:244
+msgid "hours"
+msgstr "часов"
+
+#: sport_event_bot2.py:246
+msgid "Players list"
+msgstr "Список игроков"
+
+#: sport_event_bot2.py:251
+msgid "Reserve"
+msgstr "В резерве"
+
+#: sport_event_bot2.py:262
+msgid "Revoked applications"
+msgstr "Отозванные заявки"
+
+#: sport_event_bot2.py:268
+msgid "No applications yet"
+msgstr "Пока нет записавшихся"
+
+#: sport_event_bot2.py:277
+msgid "No events"
+msgstr "Нет событий"
+
+#: sport_event_bot2.py:339
+#, python-format
+msgid "Guest player applied by %(full_name)s"
+msgstr "Игрок %(full_name)s добавил гостевого игрока"
+
+#: sport_event_bot2.py:350
+#, python-format
+msgid "Guest player was revoked by %(full_name)s"
+msgstr "Игрок %(full_name)s удалил гостевого игрока"
+
+#: sport_event_bot2.py:360
+msgid "No active event found."
+msgstr "Нет активных анонсов игр"
+
+#: sport_event_bot2.py:375
+msgid "Error: Please provide a user ID. Usage: /penalty USERID"
+msgstr "Ошибка: укажите user ID. Правильно так: /penalty USERID"
+
+#: sport_event_bot2.py:380
+#, python-format
+msgid "The player %(full_name)s was handed a yellow card for non-appearance"
+msgstr "Игрок %(full_name)s получил горчичник за неявку на игру"
+
+#: sport_event_bot2.py:385
+msgid "Error applying penalty."
+msgstr "Не получилось применить наказание"
+
+#: sport_event_bot2.py:393
+msgid "No events to fix stat for"
+msgstr "Нет события для фиксации статистики"
+
+#: sport_event_bot2.py:395 sport_event_bot2.py:422
+msgid "Current statistics for this chat room members:"
+msgstr "Текущая статистика участников чата:"
+
+#: sport_event_bot2.py:423
+msgid "Registrations / Penalties"
+msgstr "Зарегистрировался / Пропустил"
+
+#: sport_event_bot2.py:437
+msgid ""
+"\n"
+"Available BOT commands:\n"
+"\n"
+"/event_add TEXT\n"
+"Register new event\n"
+"\n"
+"/event_remove\n"
+"Remove open event\n"
+"\n"
+"/event_update TEXT\n"
+"Change event description\n"
+"\n"
+"/limit XX\n"
+"Set players limit\n"
+"\n"
+"/event_datetime DATE TIME\n"
+"Set event date and time in any format. It will parsed automatically.\n"
+"Example 1: 2023-01-30, 18:00\n"
+"Example2: tomorrow, 14:30\n"
+"\n"
+"/info\n"
+"Show event details\n"
+"\n"
+"/add\n"
+"Register yourself to the event\n"
+"\n"
+"/remove\n"
+"Revoke your application\n"
+"\n"
+"/add_leg\n"
+"Register another player (not participates in this chat) to the event\n"
+"\n"
+"/rem_leg\n"
+"Revoke register for another player\n"
+"\n"
+"/pay\n"
+"Confirm payment for the event\n"
+"\n"
+"/fix\n"
+"Fix event statistics (increment participants counters)\n"
+"\n"
+"/penalty USERID\n"
+"Increase someone's PENALTY counter for unreasonable skipping of the event"
+" without notification others.\n"
+"You can find USERID by command /stat\n"
+"\n"
+"/stat\n"
+"This group members statistics (registrations and penalties)\n"
+msgstr ""
+"\n"
+"Доступные команды БОТа:\n"
+"\n"
+"/event_add ОПИСАНИЕ ДАТЫ ВРЕМЯ\n"
+"Создать новое анонс/событие\n"
+"\n"
+"/event_remove\n"
+"Удалить анонс игры\n"
+"\n"
+"/event_update TEXT\n"
+"Изменить описание события\n"
+"\n"
+"/limit XX\n"
+"Изменить лимит игроков\n"
+"\n"
+"/event_datetime DATE TIME\n"
+"Установить дату и время события. Дата - в любом формате, разбирается автоматически\n"
+"Пример1: 1 мая 2025 в 18:00\n"
+"Пример2: Завтра в 14:30\n"
+"\n"
+"/info\n"
+"Показать активное событие\n"
+"\n"
+"/add\n"
+"Записаться на участие в событии\n"
+"\n"
+"/remove\n"
+"Отозвать свою заявку на участие\n"
+"\n"
+"/add_leg\n"
+"Зарегистрировать гостевого игрока (не из этого чата)\n"
+"\n"
+"/rem_leg\n"
+"Отозвать бронь на гостевого игрока\n"
+"\n"
+"/pay\n"
+"Сказать всем: Я оплатил! \n"
+"\n"
+"/fix\n"
+"Закрыть событие и собрать его статистику\n"
+"\n"
+"/penalty USERID\n"
+"Выдать желтую карточку записавшемуся игроку"
+"который пропустил игру по неуважительной причине\n"
+"USERID можно узнать командой /stat\n"
+"\n"
+"/stat\n"
+"Статистика участия в играх регистрации/неявки\n"
+

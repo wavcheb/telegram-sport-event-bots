@@ -1,0 +1,245 @@
+# Translations template for PROJECT.
+# Copyright (C) 2025 ORGANIZATION
+# This file is distributed under the same license as the PROJECT project.
+msgid ""
+msgstr ""
+"Project-Id-Version: PROJECT VERSION\n"
+"Report-Msgid-Bugs-To: EMAIL@ADDRESS\n"
+"POT-Creation-Date: 2025-04-07 16:24+0300\n"
+"PO-Revision-Date: YEAR-MO-DA HO:MI+ZONE\n"
+"Last-Translator: FULL NAME <EMAIL@ADDRESS>\n"
+"Language-Team: LANGUAGE <LL@li.org>\n"
+"MIME-Version: 1.0\n"
+"Content-Type: text/plain; charset=utf-8\n"
+"Content-Transfer-Encoding: 8bit\n"
+"Generated-By: Babel 2.17.0\n"
+
+#: sport_event_bot2.py:72
+msgid "+ Apply for participation"
+msgstr "+ التقديم للمشاركة"
+
+#: sport_event_bot2.py:73
+msgid "- Revoke application"
+msgstr "- سحب الطلب"
+
+#: sport_event_bot2.py:74
+msgid "+ Apply friend or legioneer"
+msgstr "+ إضافة صديق أو لاعب خارجي"
+
+#: sport_event_bot2.py:75
+msgid "- Remove last friend or legioneer"
+msgstr "- إزالة آخر صديق أو لاعب خارجي"
+
+#: sport_event_bot2.py:76
+msgid "💰 Payment confirmed"
+msgstr "💰 تم تأكيد الدفع!"
+
+#: sport_event_bot2.py:102 sport_event_bot2.py:366
+msgid "Payment confirmed!"
+msgstr "تم تسجيل دفعك!"
+
+#: sport_event_bot2.py:104 sport_event_bot2.py:363
+msgid "You must be registered for the event to confirm payment."
+msgstr "يجب أن تكون مسجلاً في الحدث لتأكيد الدفع."
+
+#: sport_event_bot2.py:120
+msgid "en_US"
+msgstr "ar_AR"
+
+#: sport_event_bot2.py:161
+msgid "Error: Please provide an event description. Usage: /event_add TEXT"
+msgstr "خطأ: يرجى تقديم وصف الحدث. الاستخدام: /event_add نص"
+
+#: sport_event_bot2.py:165
+msgid "Error: An active event already exists. Close it with /event_remove first."
+msgstr "خطأ: يوجد حدث نشط بالفعل. أغلقه أولاً باستخدام /event_remove"
+
+#: sport_event_bot2.py:179
+msgid "New event created"
+msgstr "تم إنشاء حدث جديد"
+
+#: sport_event_bot2.py:235
+msgid "Players limit"
+msgstr "حد اللاعبين"
+
+#: sport_event_bot2.py:239
+msgid "Event date and time"
+msgstr "تاريخ ووقت الحدث"
+
+#: sport_event_bot2.py:241
+msgid "Event time out"
+msgstr "انتهى وقت الحدث"
+
+#: sport_event_bot2.py:244
+msgid "Time left"
+msgstr "الوقت المتبقي"
+
+#: sport_event_bot2.py:244
+msgid "days"
+msgstr "أيام"
+
+#: sport_event_bot2.py:244
+msgid "and"
+msgstr "و"
+
+#: sport_event_bot2.py:244
+msgid "hours"
+msgstr "ساعات"
+
+#: sport_event_bot2.py:246
+msgid "Players list"
+msgstr "قائمة اللاعبين"
+
+#: sport_event_bot2.py:251
+msgid "Reserve"
+msgstr "الاحتياط"
+
+#: sport_event_bot2.py:262
+msgid "Revoked applications"
+msgstr "الطلبات المسحوبة"
+
+#: sport_event_bot2.py:268
+msgid "No applications yet"
+msgstr "لا توجد طلبات بعد"
+
+#: sport_event_bot2.py:277
+msgid "No events"
+msgstr "لا توجد أحداث"
+
+#: sport_event_bot2.py:339
+#, python-format
+msgid "Guest player applied by %(full_name)s"
+msgstr "لاعب ضيف تم تسجيله بواسطة %(full_name)s"
+
+#: sport_event_bot2.py:350
+#, python-format
+msgid "Guest player was revoked by %(full_name)s"
+msgstr "تم سحب لاعب ضيف بواسطة %(full_name)s"
+
+#: sport_event_bot2.py:360
+msgid "No active event found."
+msgstr "لم يتم العثور على حدث نشط."
+
+#: sport_event_bot2.py:375
+msgid "Error: Please provide a user ID. Usage: /penalty USERID"
+msgstr "خطأ: يرجى تقديم معرف المستخدم. الاستخدام: /penalty USERID"
+
+#: sport_event_bot2.py:380
+#, python-format
+msgid "The player %(full_name)s was handed a yellow card for non-appearance"
+msgstr "اللاعب %(full_name)s تلقى بطاقة صفراء لعدم الحضور"
+
+#: sport_event_bot2.py:385
+msgid "Error applying penalty."
+msgstr "خطأ في تطبيق العقوبة."
+
+#: sport_event_bot2.py:393
+msgid "No events to fix stat for"
+msgstr "لا توجد أحداث لتثبيت الإحصائيات لها"
+
+#: sport_event_bot2.py:395 sport_event_bot2.py:422
+msgid "Current statistics for this chat room members:"
+msgstr "الإحصائيات الحالية لأعضاء غرفة الدردشة:"
+
+#: sport_event_bot2.py:423
+msgid "Registrations / Penalties"
+msgstr "التسجيلات / العقوبات"
+
+#: sport_event_bot2.py:437
+msgid ""
+"\n"
+"Available BOT commands:\n"
+"\n"
+"/event_add TEXT\n"
+"Register new event\n"
+"\n"
+"/event_remove\n"
+"Remove open event\n"
+"\n"
+"/event_update TEXT\n"
+"Change event description\n"
+"\n"
+"/limit XX\n"
+"Set players limit\n"
+"\n"
+"/event_datetime DATE TIME\n"
+"Set event date and time in any format. It will parsed automatically.\n"
+"Example 1: 2023-01-30, 18:00\n"
+"Example2: tomorrow, 14:30\n"
+"\n"
+"/info\n"
+"Show event details\n"
+"\n"
+"/add\n"
+"Register yourself to the event\n"
+"\n"
+"/remove\n"
+"Revoke your application\n"
+"\n"
+"/add_leg\n"
+"Register another player (not participates in this chat) to the event\n"
+"\n"
+"/rem_leg\n"
+"Revoke register for another player\n"
+"\n"
+"/pay\n"
+"Confirm payment for the event\n"
+"\n"
+"/fix\n"
+"Fix event statistics (increment participants counters)\n"
+"\n"
+"/penalty USERID\n"
+"Increase someone's PENALTY counter for unreasonable skipping of the event without notification others.\n"
+"You can find USERID by command /stat\n"
+"\n"
+"/stat\n"
+"This group members statistics (registrations and penalties)\n"
+msgstr ""
+"\n"
+"الأوامر المتاحة للبوت:\n"
+"\n"
+"/event_add نص\n"
+"تسجيل حدث جديد\n"
+"\n"
+"/event_remove\n"
+"إزالة الحدث المفتوح\n"
+"\n"
+"/event_update نص\n"
+"تغيير وصف الحدث\n"
+"\n"
+"/limit XX\n"
+"تحديد حد اللاعبين\n"
+"\n"
+"/event_datetime التاريخ الوقت\n"
+"تحديد تاريخ ووقت الحدث بأي صيغة. سيتم تحليله تلقائيًا.\n"
+"مثال 1: 2023-01-30، 18:00\n"
+"مثال 2: غدًا، 14:30\n"
+"\n"
+"/info\n"
+"عرض تفاصيل الحدث\n"
+"\n"
+"/add\n"
+"تسجيل نفسك في الحدث\n"
+"\n"
+"/remove\n"
+"سحب طلبك\n"
+"\n"
+"/add_leg\n"
+"تسجيل لاعب آخر (غير مشارك في هذه الدردشة) في الحدث\n"
+"\n"
+"/rem_leg\n"
+"سحب تسجيل لاعب آخر\n"
+"\n"
+"/pay\n"
+"تأكيد الدفع للحدث\n"
+"\n"
+"/fix\n"
+"تثبيت إحصائيات الحدث (زيادة عدادات المشاركين)\n"
+"\n"
+"/penalty USERID\n"
+"زيادة عداد العقوبات لشخص ما بسبب تخطي الحدث دون إشعار الآخرين.\n"
+"يمكنك العثور على USERID باستخدام الأمر /stat\n"
+"\n"
+"/stat\n"
+"إحصائيات أعضاء المجموعة (التسجيلات والعقوبات)\n"
+

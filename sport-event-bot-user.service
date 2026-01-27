@@ -1,0 +1,22 @@
+# Systemd User Service for Sport Event Bot
+# This service runs as regular user (without root privileges)
+
+[Unit]
+Description=Telegram Sport Event Bot (User Service)
+After=network.target
+
+[Service]
+Type=simple
+WorkingDirectory=%h/tgbot
+ExecStart=%h/tgbot/run_sport_event_bot.sh
+Restart=always
+RestartSec=10
+StandardOutput=append:%h/tgbot/sport_event_bot/logs/systemd.log
+StandardError=append:%h/tgbot/sport_event_bot/logs/systemd.log
+
+# Security (user services are already sandboxed)
+NoNewPrivileges=true
+PrivateTmp=true
+
+[Install]
+WantedBy=default.target

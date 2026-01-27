@@ -6,9 +6,8 @@ temp
 .mypy_cache/
 *.pyc
 *.json
-*.exe
-tests*
-musor*
-db.sqlite3
 .pytest_cache/
-bot_db.sqlite3
+tournament_bot/logs/
+sport_event_bot/logs/
+sport_event_bot/token.txt
+tournament_bot/token.txt
