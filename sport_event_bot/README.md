@@ -1,6 +1,6 @@
 # ⚽ Sport Event Bot
 
-Telegram bot for organizing sports events (football/futsal) with participant registration, payment tracking, and attendance statistics.
+Telegram bot for organizing sports events (any game such as football, volleyball, poker etc.) with participant registration, payment tracking, and attendance statistics.
 
 ## 🌟 Features
 
