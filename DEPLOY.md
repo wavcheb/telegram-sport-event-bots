@@ -1,6 +1,6 @@
 # 🚀 Deployment Guide
 
-Complete guide for deploying Champ Bots on a production server.
+Complete guide for deploying telegram-sport-event-bots Bots on a production server.
 
 ## 📋 Prerequisites
 
@@ -48,7 +48,7 @@ sudo mkdir tgbot
 sudo chown $USER:$USER tgbot
 cd tgbot
 
-git clone https://github.com/wavcheb/champ.git .
+git clone https://github.com/wavcheb/telegram-sport-event-bots.git .
 ```
 
 ### 2. Setup Virtual Environments
