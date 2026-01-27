@@ -1,4 +1,4 @@
-# ⚽🏆 Champ - Telegram Sports Bots Collection
+# ⚽🏆 Telegram Sport Event Bots - Telegram Sports Bots Collection
 
 A comprehensive collection of Telegram bots for managing sports events and tournaments. Each bot is fully independent with its own configuration, database, and logs.
 
@@ -41,8 +41,8 @@ Telegram bot for managing sports tournaments with automatic standings calculatio
 
 1. **Clone the repository**
    ```bash
-   git clone https://github.com/wavcheb/champ.git
-   cd champ
+   git clone https://github.com/wavcheb/telegram-sport-event-bots.git
+   cd telegram-sport-event-bots
    ```
 
 2. **Setup virtual environments**
@@ -101,7 +101,7 @@ Telegram bot for managing sports tournaments with automatic standings calculatio
 ## 📁 Project Structure
 
 ```
-champ/
+telegram-sport-event-bots/
 ├── sport_event_bot/          # Sport Event Bot
 │   ├── bot.py               # Main bot logic
 │   ├── db_mysql.py          # Database operations
