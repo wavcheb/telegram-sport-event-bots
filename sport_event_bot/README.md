@@ -24,8 +24,8 @@ Telegram bot for organizing sports events (football/futsal) with participant reg
 ### 1. Clone the Repository
 
 ```bash
-git clone https://github.com/wavcheb/champ.git
-cd champ
+git clone https://github.com/wavcheb/telegram-sport-event-bots.git
+cd telegram-sport-event-bots
 ```
 
 ### 2. Install Dependencies
@@ -167,7 +167,7 @@ Language is detected automatically from user's Telegram settings.
 ### Project Structure
 
 ```
-champ/
+telegram-sport-event-bots/
 ├── sport_event_bot/          # Sport Event Bot module
 │   ├── __init__.py          # Package initialization
 │   ├── bot.py               # Main bot logic and handlers
