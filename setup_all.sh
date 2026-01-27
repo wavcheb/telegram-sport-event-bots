@@ -6,7 +6,7 @@ set -e
 PROJECT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 cd "$PROJECT_DIR"
 
-echo "🚀 Setting up Champ Bots Project"
+echo "🚀 Setting up telegram-sport-event-bots Project"
 echo "================================="
 echo ""
 
