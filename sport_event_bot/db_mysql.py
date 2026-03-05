@@ -126,6 +126,8 @@ def create_table_participants():
             user_id BIGINT,
             operation_datetime DATETIME NOT NULL,
             paid BOOLEAN DEFAULT FALSE,
+            paid_at DATETIME DEFAULT NULL,
+            invited_by BIGINT DEFAULT NULL,
             UNIQUE KEY uq_event_user (event_id, user_id),
             KEY idx_participants_event (event_id),
             CONSTRAINT fk_part_event
@@ -470,17 +472,17 @@ def get_legioneer_user(event_id: int):
         return int(count[0]) + 10
     raise ValueError(f"Strange error - not found legioners in event {event_id}")
 
-def apply_for_legioneer(chat_id):
+def apply_for_legioneer(chat_id, invited_by_user_id=None):
     logger.info(f"Event - New legioneer-player request from chat {chat_id}")
     conn = reconnect()
     event_id = get_event_id_by_chat_id(chat_id)
     user_id = get_legioneer_user(event_id)
     dtm = datetime.datetime.now()
     _exec(conn, '''
-        INSERT INTO Participants (event_id, user_id, operation_datetime, paid)
-        VALUES (%s, %s, %s, FALSE)
-        ON DUPLICATE KEY UPDATE operation_datetime = VALUES(operation_datetime);
-    ''', (event_id, user_id, dtm))
+        INSERT INTO Participants (event_id, user_id, operation_datetime, paid, invited_by)
+        VALUES (%s, %s, %s, FALSE, %s)
+        ON DUPLICATE KEY UPDATE operation_datetime = VALUES(operation_datetime), invited_by = VALUES(invited_by);
+    ''', (event_id, user_id, dtm, invited_by_user_id))
     _exec(conn, '''
         DELETE FROM Revoked WHERE event_id = %s AND user_id = %s;
     ''', (event_id, user_id))
@@ -542,14 +544,15 @@ def get_user_cancellation_datetime(chat_id, canceled_user_id: int) -> str:
 def set_payment_status(chat_id: int, user_id: int, paid: bool = True):
     """Set payment status for a player in the open event of a chat"""
     conn = reconnect()
+    paid_at = datetime.datetime.now() if paid else None
     _exec(conn, '''
         UPDATE Participants p
         JOIN (
             SELECT e.event_id FROM Events e WHERE e.status = "Open" AND e.chat_id = %s ORDER BY e.event_id DESC LIMIT 1
         ) ev ON p.event_id = ev.event_id
-        SET p.paid = %s
+        SET p.paid = %s, p.paid_at = %s
         WHERE p.user_id = %s;
-    ''', (chat_id, 1 if paid else 0, user_id))
+    ''', (chat_id, 1 if paid else 0, paid_at, user_id))
     conn.commit()
     conn.close()
 
@@ -569,15 +572,119 @@ def get_payment_status(chat_id: int, user_id: int) -> bool:
     conn.close()
     return bool(row[0]) if row else False
 
+def create_table_payment_log():
+    conn = reconnect()
+    _exec(conn, '''
+        CREATE TABLE IF NOT EXISTS PaymentLog (
+            log_id BIGINT NOT NULL AUTO_INCREMENT,
+            event_id BIGINT NOT NULL,
+            payer_user_id BIGINT NOT NULL,
+            paid_at DATETIME NOT NULL,
+            for_friend BOOLEAN DEFAULT FALSE,
+            PRIMARY KEY (log_id),
+            KEY idx_paylog_event (event_id)
+        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+    ''')
+    conn.commit()
+    conn.close()
+
+def migrate_schema():
+    """Add new columns to existing tables if they don't exist yet."""
+    conn = reconnect()
+    for col, definition in [
+        ('paid_at', 'DATETIME DEFAULT NULL'),
+        ('invited_by', 'BIGINT DEFAULT NULL'),
+    ]:
+        try:
+            _exec(conn, f'ALTER TABLE Participants ADD COLUMN {col} {definition}')
+        except Exception:
+            pass  # column already exists
+    conn.close()
+
+def init_database():
+    """Create all tables and run schema migrations."""
+    create_table_users()
+    create_table_chats()
+    create_table_events()
+    create_table_participants()
+    create_table_revoked()
+    create_table_chat_penalties()
+    create_table_payment_log()
+    migrate_schema()
+
+def record_payment_log(chat_id: int, payer_user_id: int, for_friend: bool = False):
+    """Append a payment event to PaymentLog for the active event."""
+    conn = reconnect()
+    cur = _exec(conn, '''
+        SELECT event_id FROM Events WHERE status = "Open" AND chat_id = %s ORDER BY event_id DESC LIMIT 1
+    ''', (chat_id,))
+    row = cur.fetchone()
+    if not row:
+        conn.close()
+        return
+    event_id = row[0]
+    _exec(conn, '''
+        INSERT INTO PaymentLog (event_id, payer_user_id, paid_at, for_friend)
+        VALUES (%s, %s, %s, %s)
+    ''', (event_id, payer_user_id, datetime.datetime.now(), 1 if for_friend else 0))
+    conn.commit()
+    conn.close()
+
+def get_payment_log(chat_id: int) -> List[Tuple]:
+    """Return [(payer_user_id, paid_at, for_friend), ...] ordered by time."""
+    conn = reconnect()
+    cur = _exec(conn, '''
+        SELECT pl.payer_user_id, pl.paid_at, pl.for_friend
+        FROM PaymentLog pl
+        WHERE pl.event_id = (
+            SELECT event_id FROM Events WHERE status = "Open" AND chat_id = %s ORDER BY event_id DESC LIMIT 1
+        )
+        ORDER BY pl.paid_at
+    ''', (chat_id,))
+    rows = cur.fetchall()
+    conn.close()
+    return [(int(r[0]), r[1], bool(r[2])) for r in rows] if rows else []
+
+def has_user_invited_legioneer(chat_id: int, user_id: int) -> bool:
+    """Check if user has invited any legioneer to the active event."""
+    conn = reconnect()
+    cur = _exec(conn, '''
+        SELECT COUNT(*)
+        FROM Participants
+        WHERE event_id = (
+            SELECT event_id FROM Events WHERE status = "Open" AND chat_id = %s ORDER BY event_id DESC LIMIT 1
+        )
+        AND user_id < 30
+        AND invited_by = %s
+    ''', (chat_id, user_id))
+    row = cur.fetchone()
+    conn.close()
+    return bool(row and row[0] > 0)
+
+def process_payment(chat_id: int, user_id: int) -> dict:
+    """
+    Handle PAY button press. Returns dict with 'message' and 'success' keys.
+    First press -> payment for self. Subsequent presses (if user has legioneer) -> for friend.
+    """
+    if user_id not in (get_event_users(chat_id) or []):
+        return {'message': 'You must be registered for the event to confirm payment.', 'success': False}
+
+    already_paid = get_payment_status(chat_id, user_id)
+    if not already_paid:
+        set_payment_status(chat_id, user_id, True)
+        record_payment_log(chat_id, user_id, for_friend=False)
+        return {'message': 'Payment confirmed!', 'success': True}
+
+    if has_user_invited_legioneer(chat_id, user_id):
+        record_payment_log(chat_id, user_id, for_friend=True)
+        return {'message': 'Payment for friend confirmed!', 'success': True}
+
+    return {'message': 'Payment already confirmed.', 'success': False}
+
 if __name__ == '__main__':
     try:
         print('Creating tables in MySQL database...')
-        create_table_users()
-        create_table_chats()
-        create_table_events()
-        create_table_participants()
-        create_table_revoked()
-        create_table_chat_penalties()
+        init_database()
         print('Done.')
     except Error as e:
         print(f'Error: {e}')
