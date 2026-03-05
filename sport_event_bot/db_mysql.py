@@ -5,7 +5,7 @@ Updated to support payment status for participants. Migrated from sqlite3 to MyS
 
 import sys
 import datetime
-from typing import List, Set, Tuple
+from typing import List, Optional, Set, Tuple
 from loguru import logger
 import mysql.connector
 from mysql.connector import Error
@@ -105,6 +105,8 @@ def create_table_events():
             description TEXT,
             datetime VARCHAR(64) DEFAULT "",
             players_limit INT DEFAULT 0,
+            payment_url TEXT DEFAULT NULL,
+            telegraph_url TEXT DEFAULT NULL,
             extra1 TEXT,
             extra2 TEXT,
             extra3 TEXT,
@@ -245,6 +247,32 @@ def get_event_datetime(chat_id: int) -> str:
         logger.warning("get_event_datetime -> No events!")
         return ''
     return row[0]
+
+def get_event_payment_url(chat_id: int) -> Optional[str]:
+    conn = reconnect()
+    cur = _exec(conn, '''SELECT payment_url FROM Events WHERE status="Open" AND chat_id = %s LIMIT 1;''', (chat_id,))
+    row = cur.fetchone()
+    conn.close()
+    return row[0] if row and row[0] else None
+
+def set_event_payment_url(chat_id: int, url: Optional[str]):
+    conn = reconnect()
+    _exec(conn, '''UPDATE Events SET payment_url = %s WHERE status = "Open" AND chat_id = %s;''', (url, chat_id))
+    conn.commit()
+    conn.close()
+
+def get_event_telegraph_url(chat_id: int) -> Optional[str]:
+    conn = reconnect()
+    cur = _exec(conn, '''SELECT telegraph_url FROM Events WHERE status="Open" AND chat_id = %s LIMIT 1;''', (chat_id,))
+    row = cur.fetchone()
+    conn.close()
+    return row[0] if row and row[0] else None
+
+def set_event_telegraph_url(chat_id: int, url: Optional[str]):
+    conn = reconnect()
+    _exec(conn, '''UPDATE Events SET telegraph_url = %s WHERE status = "Open" AND chat_id = %s;''', (url, chat_id))
+    conn.commit()
+    conn.close()
 
 def fix_event(chat_id):
     conn = reconnect()
@@ -591,12 +619,15 @@ def create_table_payment_log():
 def migrate_schema():
     """Add new columns to existing tables if they don't exist yet."""
     conn = reconnect()
-    for col, definition in [
-        ('paid_at', 'DATETIME DEFAULT NULL'),
-        ('invited_by', 'BIGINT DEFAULT NULL'),
-    ]:
+    migrations = [
+        ('Participants', 'paid_at', 'DATETIME DEFAULT NULL'),
+        ('Participants', 'invited_by', 'BIGINT DEFAULT NULL'),
+        ('Events', 'payment_url', 'TEXT DEFAULT NULL'),
+        ('Events', 'telegraph_url', 'TEXT DEFAULT NULL'),
+    ]
+    for table, col, definition in migrations:
         try:
-            _exec(conn, f'ALTER TABLE Participants ADD COLUMN {col} {definition}')
+            _exec(conn, f'ALTER TABLE {table} ADD COLUMN {col} {definition}')
         except Exception:
             pass  # column already exists
     conn.close()

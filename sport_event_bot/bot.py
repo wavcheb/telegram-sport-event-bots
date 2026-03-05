@@ -20,6 +20,7 @@ import parsedatetime
 import urllib.request
 from html.parser import HTMLParser
 from . import db_mysql as db
+from . import telegraph as tph
 import asyncio
 from typing import Optional, Callable
 from functools import wraps
@@ -135,10 +136,9 @@ def make_translatable_user_id_context(func):
 def _serialize_inline_kb(kb: InlineKeyboardMarkup) -> str:
     if not kb or not kb.inline_keyboard:
         return ""
-    # Сериализуем только текст кнопок и callback_data (достаточно для эквивалентности)
     rows = []
     for row in kb.inline_keyboard:
-        rows.append("|".join(f"{btn.text}::{btn.callback_data or ''}" for btn in row))
+        rows.append("|".join(f"{btn.text}::{btn.callback_data or btn.url or ''}" for btn in row))
     return "\n".join(rows)
 
 def new_chat_id_memoization(chat_id: int, lang: str, all_known_chat_ids=db.get_all_chat_ids()):
@@ -148,16 +148,25 @@ def new_chat_id_memoization(chat_id: int, lang: str, all_known_chat_ids=db.get_a
         logger.info(f'New chat_id: {chat_id}')
 
 @logger.catch
-def build_message_markup(translate_func: Callable[[str], str]):
+def build_message_markup(translate_func: Callable[[str], str],
+                          payment_url: str = None, telegraph_url: str = None):
     """Создание кнопок с использованием переданной функции перевода"""
-    button_list = [
-        InlineKeyboardButton(translate_func('+ Apply for participation'), callback_data='ADD'),
-        InlineKeyboardButton(translate_func('- Revoke application'), callback_data='REMOVE'),
-        InlineKeyboardButton(translate_func('+ Apply friend or legioneer'), callback_data='ADD_LEGIONEER'),
-        InlineKeyboardButton(translate_func('- Remove last friend or legioneer'), callback_data='REMOVE_LEGIONEER'),
-        InlineKeyboardButton(translate_func('💰 Payment confirmed'), callback_data='PAY'),
+    rows = [
+        [InlineKeyboardButton(translate_func('+ Apply for participation'), callback_data='ADD')],
+        [InlineKeyboardButton(translate_func('- Revoke application'), callback_data='REMOVE')],
+        [InlineKeyboardButton(translate_func('+ Apply friend or legioneer'), callback_data='ADD_LEGIONEER')],
+        [InlineKeyboardButton(translate_func('- Remove last friend or legioneer'), callback_data='REMOVE_LEGIONEER')],
+        [InlineKeyboardButton(translate_func('💰 Payment confirmed'), callback_data='PAY')],
     ]
-    return InlineKeyboardMarkup(build_menu(button_list, n_cols=1))
+    # Payment link + telegraph log on the same row
+    url_row = []
+    if payment_url:
+        url_row.append(InlineKeyboardButton('💳 Ссылка для оплаты', url=payment_url))
+    if telegraph_url:
+        url_row.append(InlineKeyboardButton('Оплаты', url=telegraph_url))
+    if url_row:
+        rows.append(url_row)
+    return InlineKeyboardMarkup(rows)
 
 @logger.catch
 @make_translatable_user_id_context
@@ -182,10 +191,22 @@ async def button(update, context):
     elif query.data == "PAY":
         result = db.process_payment(this_chat_id, user_id)
         await query.answer(translate(result['message']))
+        if result['success']:
+            # Update Telegraph payment log page
+            try:
+                entries = db.get_payment_log(this_chat_id)
+                event_title = db.get_event_text(this_chat_id) or ''
+                existing_url = db.get_event_telegraph_url(this_chat_id)
+                new_tph_url = await tph.publish_payment_log(event_title, entries, existing_url)
+                db.set_event_telegraph_url(this_chat_id, new_tph_url)
+            except Exception as e:
+                logger.warning(f"Telegraph update failed: {e}")
 
+    payment_url = db.get_event_payment_url(this_chat_id)
+    telegraph_url = db.get_event_telegraph_url(this_chat_id)
     message_text = create_event_full_text(this_chat_id, translate)
     safe_text = (message_text or "").strip() or " "
-    new_kb = build_message_markup(translate)
+    new_kb = build_message_markup(translate, payment_url=payment_url, telegraph_url=telegraph_url)
     new_kb_sig = _serialize_inline_kb(new_kb)
 
     # Текущее сохранённое состояние
@@ -272,18 +293,14 @@ async def create_new_event(update, context):
         await update.message.reply_text(translate('Error: An active event already exists. Close it with /event_remove first.'))
         return
 
-    # If event_text is (or contains) a URL, fetch the page title
+    # Extract payment URL from event text and store separately
+    payment_url = None
     url_match = re.search(r'https?://\S+', event_text)
     if url_match:
-        url = url_match.group().rstrip('.,)')
-        title = await _fetch_url_title(url)
-        if title:
-            if event_text.strip() == url:
-                # User provided only a URL — use the fetched title as description
-                event_text = f"{title}\n{url}"
-            else:
-                # User provided text + URL — append fetched title as annotation
-                event_text = event_text.replace(url, f"{url} [{title}]")
+        payment_url = url_match.group().rstrip('.,)')
+        before = event_text[:url_match.start()].strip()
+        after = event_text[url_match.end():].strip()
+        event_text = ' '.join(filter(None, [before, after])).strip()
 
     txt = event_text.lower()
     limit_markers = ['maximum', 'max', 'limit', 'максимум', 'максимальн', 'макс', 'лимит', 'ограничени', 'до']
@@ -300,9 +317,13 @@ async def create_new_event(update, context):
     if not message_text.strip():
         message_text = " "
     new_message = await context.bot.send_message(
-        this_chat_id, message_text, reply_markup=build_message_markup(translate), parse_mode=ParseMode.HTML
+        this_chat_id, message_text,
+        reply_markup=build_message_markup(translate, payment_url=payment_url),
+        parse_mode=ParseMode.HTML
     )
     db.event_add(this_chat_id, event_text, event_datetime, event_limit, new_message.message_id, message_text)
+    if payment_url:
+        db.set_event_payment_url(this_chat_id, payment_url)
 
 @logger.catch
 async def update_event(update, context):
@@ -407,8 +428,12 @@ async def show_info(update, context):
             await context.bot.edit_message_reply_markup(chat_id=this_chat_id, message_id=latest_bot_message_id)
         except Exception as e:
             logger.warning(f"Failed to clear reply markup: {e}")
+    payment_url = db.get_event_payment_url(this_chat_id)
+    telegraph_url = db.get_event_telegraph_url(this_chat_id)
     new_message = await context.bot.send_message(
-        this_chat_id, event_text, reply_markup=build_message_markup(translate), parse_mode=ParseMode.HTML, disable_web_page_preview=True
+        this_chat_id, event_text,
+        reply_markup=build_message_markup(translate, payment_url=payment_url, telegraph_url=telegraph_url),
+        parse_mode=ParseMode.HTML, disable_web_page_preview=True
     )
     db.save_latest_bot_message(this_chat_id, new_message.message_id, event_text)
 
@@ -579,26 +604,37 @@ async def show_stat(update, context):
 @logger.catch
 @make_translatable_user_id_context
 async def show_payments(update, context):
-    """Show payment log for the active event (/payments command)."""
+    """Publish payment log to Telegraph and send the link (/payments command)."""
     this_chat_id = update.message.chat_id
     new_chat_id_memoization(this_chat_id, update.message.from_user.language_code)
-    if not db.get_event_text(this_chat_id):
+    event_title = db.get_event_text(this_chat_id)
+    if not event_title:
         await update.message.reply_text('No active event.')
         return
     entries = db.get_payment_log(this_chat_id)
-    if not entries:
-        await update.message.reply_text('💰 No payment records yet.')
-        return
-    lines = ['💰 <b>Отчёт об оплатах:</b>\n']
-    for user_id, paid_at, for_friend in entries:
-        name = db.compose_full_name(user_id)
-        if isinstance(paid_at, datetime.datetime):
-            time_str = paid_at.strftime('%H:%M')
-        else:
-            time_str = str(paid_at)[:5]
-        note = ' (скорее всего за друга)' if for_friend else ' (скорее всего за себя)'
-        lines.append(f'• <b>{name}</b> сообщил об оплате в {time_str}{note}')
-    await update.message.reply_text('\n'.join(lines), parse_mode=ParseMode.HTML)
+    try:
+        existing_url = db.get_event_telegraph_url(this_chat_id)
+        page_url = await tph.publish_payment_log(event_title, entries, existing_url)
+        db.set_event_telegraph_url(this_chat_id, page_url)
+        count = len(entries)
+        await update.message.reply_text(
+            f'💰 <b>Отчёт об оплатах</b> ({count} записей):\n{page_url}',
+            parse_mode=ParseMode.HTML,
+            disable_web_page_preview=False
+        )
+    except Exception as e:
+        logger.error(f"Telegraph publish failed: {e}")
+        # Fallback: show inline
+        if not entries:
+            await update.message.reply_text('💰 No payment records yet.')
+            return
+        lines = ['💰 <b>Отчёт об оплатах:</b>\n']
+        for user_id, paid_at, for_friend in entries:
+            name = db.compose_full_name(user_id)
+            time_str = paid_at.strftime('%H:%M') if isinstance(paid_at, datetime.datetime) else str(paid_at)[:5]
+            note = ' (скорее всего за друга)' if for_friend else ' (скорее всего за себя)'
+            lines.append(f'• <b>{name}</b> сообщил об оплате в {time_str}{note}')
+        await update.message.reply_text('\n'.join(lines), parse_mode=ParseMode.HTML)
 
 @logger.catch
 @make_translatable_user_id_context
