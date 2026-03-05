@@ -161,9 +161,9 @@ def build_message_markup(translate_func: Callable[[str], str],
     # Payment link + telegraph log on the same row
     url_row = []
     if payment_url:
-        url_row.append(InlineKeyboardButton('💳 Ссылка для оплаты', url=payment_url))
+        url_row.append(InlineKeyboardButton(translate_func('💳 Payment link'), url=payment_url))
     if telegraph_url:
-        url_row.append(InlineKeyboardButton('Оплаты', url=telegraph_url))
+        url_row.append(InlineKeyboardButton(translate_func('Payments'), url=telegraph_url))
     if url_row:
         rows.append(url_row)
     return InlineKeyboardMarkup(rows)
@@ -606,10 +606,11 @@ async def show_stat(update, context):
 async def show_payments(update, context):
     """Publish payment log to Telegraph and send the link (/payments command)."""
     this_chat_id = update.message.chat_id
+    translate = context.user_data['translate']
     new_chat_id_memoization(this_chat_id, update.message.from_user.language_code)
     event_title = db.get_event_text(this_chat_id)
     if not event_title:
-        await update.message.reply_text('No active event.')
+        await update.message.reply_text(translate('No active event found.'))
         return
     entries = db.get_payment_log(this_chat_id)
     try:
@@ -618,7 +619,7 @@ async def show_payments(update, context):
         db.set_event_telegraph_url(this_chat_id, page_url)
         count = len(entries)
         await update.message.reply_text(
-            f'💰 <b>Отчёт об оплатах</b> ({count} записей):\n{page_url}',
+            f'💰 <b>{translate("Payment log")}</b> ({count} {translate("records")}):\n{page_url}',
             parse_mode=ParseMode.HTML,
             disable_web_page_preview=False
         )
@@ -626,14 +627,14 @@ async def show_payments(update, context):
         logger.error(f"Telegraph publish failed: {e}")
         # Fallback: show inline
         if not entries:
-            await update.message.reply_text('💰 No payment records yet.')
+            await update.message.reply_text(translate('No payment records yet.'))
             return
-        lines = ['💰 <b>Отчёт об оплатах:</b>\n']
+        lines = [f'💰 <b>{translate("Payment log")}:</b>\n']
         for user_id, paid_at, for_friend in entries:
             name = db.compose_full_name(user_id)
             time_str = paid_at.strftime('%H:%M') if isinstance(paid_at, datetime.datetime) else str(paid_at)[:5]
-            note = ' (скорее всего за друга)' if for_friend else ' (скорее всего за себя)'
-            lines.append(f'• <b>{name}</b> сообщил об оплате в {time_str}{note}')
+            note = f' ({translate("probably for friend")})' if for_friend else f' ({translate("probably for self")})'
+            lines.append(f'• <b>{name}</b> {translate("marked payment at")} {time_str}{note}')
         await update.message.reply_text('\n'.join(lines), parse_mode=ParseMode.HTML)
 
 @logger.catch

@@ -9,6 +9,8 @@ Telegram bot for organizing sports events (any game such as football, volleyball
 - **Player Limits**: Set maximum participants with automatic reserve list
 - **Guest Players**: Add legionnaire/guest players who aren't in the chat
 - **Payment Tracking**: Track who has paid with 💰 emoji indicator
+- **Payment Link**: Embed payment URL in event - shown as inline button
+- **Payment Log**: Auto-published to Telegraph page, updated after each payment
 - **Attendance Statistics**: Track registrations and penalties for no-shows
 - **Multi-language Support**: Russian, Ukrainian, Portuguese, Arabic, and English
 - **Interactive Buttons**: Inline keyboard for quick actions
@@ -129,6 +131,13 @@ INFO     | __main__:main:626 - Bot is running...
 
 - `/pay` or click **💰 Payment confirmed** button - Mark payment as confirmed
 - Only registered participants can confirm payment
+- `/payments` - Show payment log (published to Telegraph)
+
+**Payment URL support**: Include a URL in `/event_add` text and it will be extracted as a payment link button:
+```
+/event_add Football Saturday 18:00 https://send.monobank.ua/jar/xxx
+```
+This creates an event with description "Football Saturday 18:00" and shows a 💳 Payment link button.
 
 ### Statistics & Administration
 
@@ -172,6 +181,7 @@ telegram-sport-event-bots/
 │   ├── __init__.py          # Package initialization
 │   ├── bot.py               # Main bot logic and handlers
 │   ├── db_mysql.py          # Database operations
+│   ├── telegraph.py         # Telegraph API for payment logs
 │   ├── token.txt            # Bot token (create this)
 │   ├── token.txt.example    # Token file template
 │   ├── babel.cfg            # Babel configuration for i18n

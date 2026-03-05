@@ -247,3 +247,35 @@ msgstr ""
 "/stat\n"
 "Статистика участия в играх регистрации/неявки\n"
 
+
+#: bot.py
+msgid "💳 Payment link"
+msgstr "💳 Ссылка для оплаты"
+
+#: bot.py
+msgid "Payments"
+msgstr "Оплаты"
+
+#: bot.py
+msgid "Payment log"
+msgstr "Отчёт об оплатах"
+
+#: bot.py
+msgid "records"
+msgstr "записей"
+
+#: bot.py
+msgid "No payment records yet."
+msgstr "Записей об оплатах пока нет."
+
+#: bot.py
+msgid "probably for friend"
+msgstr "скорее всего за друга"
+
+#: bot.py
+msgid "probably for self"
+msgstr "скорее всего за себя"
+
+#: bot.py
+msgid "marked payment at"
+msgstr "сообщил об оплате в"
