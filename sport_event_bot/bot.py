@@ -153,8 +153,7 @@ def new_chat_id_memoization(chat_id: int, lang: str, all_known_chat_ids=db.get_a
         logger.info(f'New chat_id: {chat_id}')
 
 @logger.catch
-def build_message_markup(translate_func: Callable[[str], str],
-                          payment_url: str = None, telegraph_url: str = None):
+def build_message_markup(translate_func: Callable[[str], str]):
     """Создание кнопок с использованием переданной функции перевода"""
     rows = [
         [InlineKeyboardButton(translate_func('+ Apply for participation'), callback_data='ADD')],
@@ -163,14 +162,6 @@ def build_message_markup(translate_func: Callable[[str], str],
         [InlineKeyboardButton(translate_func('- Remove last friend or legioneer'), callback_data='REMOVE_LEGIONEER')],
         [InlineKeyboardButton(translate_func('💰 Payment confirmed'), callback_data='PAY')],
     ]
-    # Payment link + telegraph log on the same row
-    url_row = []
-    if payment_url:
-        url_row.append(InlineKeyboardButton(translate_func('💳 Payment link'), url=payment_url))
-    if telegraph_url:
-        url_row.append(InlineKeyboardButton(translate_func('Payments'), url=telegraph_url))
-    if url_row:
-        rows.append(url_row)
     return InlineKeyboardMarkup(rows)
 
 @logger.catch
@@ -209,9 +200,9 @@ async def button(update, context):
 
     payment_url = db.get_event_payment_url(this_chat_id)
     telegraph_url = db.get_event_telegraph_url(this_chat_id)
-    message_text = create_event_full_text(this_chat_id, translate)
+    message_text = create_event_full_text(this_chat_id, translate, payment_url, telegraph_url)
     safe_text = (message_text or "").strip() or " "
-    new_kb = build_message_markup(translate, payment_url=payment_url, telegraph_url=telegraph_url)
+    new_kb = build_message_markup(translate)
     new_kb_sig = _serialize_inline_kb(new_kb)
 
     # Текущее сохранённое состояние
@@ -319,12 +310,14 @@ async def create_new_event(update, context):
                 continue
     event_datetime = parse_datetime(event_text, translate)
     message_text = translate("New event created") + ":\n\n🎉<b> " + event_text + " </b>🎉"
+    if payment_url:
+        message_text += f'\n\n<a href="{payment_url}">{translate("💳 Payment link")}</a>'
     if not message_text.strip():
         message_text = " "
     new_message = await context.bot.send_message(
         this_chat_id, message_text,
-        reply_markup=build_message_markup(translate, payment_url=payment_url),
-        parse_mode=ParseMode.HTML
+        reply_markup=build_message_markup(translate),
+        parse_mode=ParseMode.HTML, disable_web_page_preview=True
     )
     db.event_add(this_chat_id, event_text, event_datetime, event_limit, new_message.message_id, message_text)
     if payment_url:
@@ -357,7 +350,8 @@ async def set_players_limit(update, context):
         logger.exception(e)
 
 @logger.catch
-def create_event_full_text(this_chat_id: int, translate: Callable[[str], str]):
+def create_event_full_text(this_chat_id: int, translate: Callable[[str], str],
+                           payment_url: str = None, telegraph_url: str = None):
     def player_name_with_cards(games_registered, penalties, full_name, translator):
         printable_name = full_name
         games_played = games_registered - penalties
@@ -388,6 +382,15 @@ def create_event_full_text(this_chat_id: int, translate: Callable[[str], str]):
             delta = event_datetime - now
             hours = round(delta.seconds / 3600)
             text += '⏳ ' + translate('Time left') + f': {delta.days} ' + translate('days') + ' ' + translate('and') + f' {hours} ' + translate('hours') + '\n'
+
+    # Payment links above players list
+    links = []
+    if payment_url:
+        links.append(f'<a href="{payment_url}">{translate("💳 Payment link")}</a>')
+    if telegraph_url:
+        links.append(f'<a href="{telegraph_url}">{translate("Current payments")}</a>')
+    if links:
+        text += ' | '.join(links) + '\n\n'
 
     text += translate('Players list') + ':\n'
     text_players = ''
@@ -426,18 +429,18 @@ async def show_info(update, context):
     if not db.get_event_text(this_chat_id):
         await update.message.reply_text(translate('No events'))
         return
-    event_text = create_event_full_text(this_chat_id, translate).strip() or " "
+    payment_url = db.get_event_payment_url(this_chat_id)
+    telegraph_url = db.get_event_telegraph_url(this_chat_id)
+    event_text = create_event_full_text(this_chat_id, translate, payment_url, telegraph_url).strip() or " "
     latest_bot_message_id = db.get_latest_bot_message_id(this_chat_id)
     if latest_bot_message_id:
         try:
             await context.bot.edit_message_reply_markup(chat_id=this_chat_id, message_id=latest_bot_message_id)
         except Exception as e:
             logger.warning(f"Failed to clear reply markup: {e}")
-    payment_url = db.get_event_payment_url(this_chat_id)
-    telegraph_url = db.get_event_telegraph_url(this_chat_id)
     new_message = await context.bot.send_message(
         this_chat_id, event_text,
-        reply_markup=build_message_markup(translate, payment_url=payment_url, telegraph_url=telegraph_url),
+        reply_markup=build_message_markup(translate),
         parse_mode=ParseMode.HTML, disable_web_page_preview=True
     )
     db.save_latest_bot_message(this_chat_id, new_message.message_id, event_text)
