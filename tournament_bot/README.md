@@ -35,28 +35,34 @@ GRANT ALL PRIVILEGES ON tournament_bot.* TO 'tournament_bot'@'localhost';
 FLUSH PRIVILEGES;
 ```
 
-Update credentials in `tournament_bot/db_tournament.py`:
-```python
-MYSQL_CFG = {
-    'host': 'localhost',
-    'database': 'tournament_bot',
-    'user': 'tournament_bot',
-    'password': 'your_password',  # Change this!
-    ...
-}
-```
-
 Initialize database tables:
 ```bash
 python3 -m tournament_bot.db_tournament
 ```
 
-### 2. Configure Bot Token
+### 2. Configure Environment
 
-Create `tournament_bot/token.txt` file with your Telegram Bot Token:
+Edit `.env` file in project root:
 
 ```bash
-echo "YOUR_TOURNAMENT_BOT_TOKEN" > tournament_bot/token.txt
+cp .env.example .env
+nano .env
+```
+
+Add tournament bot settings:
+```
+# Tournament Bot Token (or uses TELEGRAM_BOT_TOKEN if not set)
+TOURNAMENT_BOT_TOKEN=your_tournament_bot_token
+
+# Tournament database (or uses MYSQL_* if not set)
+TOURNAMENT_MYSQL_DATABASE=tournament_bot
+TOURNAMENT_MYSQL_USER=tournament_bot
+TOURNAMENT_MYSQL_PASSWORD=your_password
+```
+
+Secure the file:
+```bash
+chmod 600 .env
 ```
 
 ### 3. Run the Bot
@@ -242,13 +248,13 @@ Tournament creation uses ConversationHandler:
 
 ```
 telegram-sport-event-bots/
-├── tournament_bot/          # Tournament Bot module
+├── .env.example            # Environment config template
+├── .env                    # Your config (create from template)
+├── tournament_bot/         # Tournament Bot module
 │   ├── __init__.py         # Package initialization
 │   ├── bot.py              # Main bot with handlers
 │   ├── db_tournament.py    # Database operations
 │   ├── tournament_logic.py # Tournament algorithms
-│   ├── token.txt           # Bot token (create this)
-│   ├── token.txt.example   # Token file template
 │   └── logs/               # Log files
 ├── run_tournament_bot.sh   # Startup script
 └── README_TOURNAMENT.md    # This file
@@ -278,14 +284,14 @@ python3 -m tournament_bot.db_tournament
 ## 🐛 Troubleshooting
 
 ### Bot doesn't start
-- Check `tournament_bot/token.txt` exists and contains valid token
+- Check `.env` has `TOURNAMENT_BOT_TOKEN` or `TELEGRAM_BOT_TOKEN` set
 - Verify Python version: `python --version` (need 3.11+)
 - Check logs: `tail -f tournament_bot/logs/tournament_bot.log`
 
 ### Database connection fails
 - Verify MySQL is running: `systemctl status mysql`
 - Test credentials: `mysql -u tournament_bot -p tournament_bot`
-- Check config in `tournament_bot/db_tournament.py`
+- Check `.env` has correct `TOURNAMENT_MYSQL_*` or `MYSQL_*` values
 
 ### Can't create tournament
 - Ensure no active tournament in that chat

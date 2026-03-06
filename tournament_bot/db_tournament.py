@@ -4,19 +4,27 @@ Database module for Tournament Bot
 Manages tournaments, teams, matches, and standings
 """
 
+import os
 import sys
 import datetime
+from pathlib import Path
 from typing import List, Tuple, Optional, Dict
 from loguru import logger
 import mysql.connector
 from mysql.connector import Error
+from dotenv import load_dotenv
 
-# Connection settings
+# Load .env from project root
+PROJECT_ROOT = Path(__file__).resolve().parent.parent
+load_dotenv(PROJECT_ROOT / '.env')
+
+# Connection settings from environment
+# Tournament bot can use its own DB settings or share with sport_event_bot
 MYSQL_CFG = {
-    'host': 'localhost',
-    'database': 'DB',
-    'user': 'USER',
-    'password': 'change_this_password',  # TODO: Change this!
+    'host': os.getenv('TOURNAMENT_MYSQL_HOST') or os.getenv('MYSQL_HOST', 'localhost'),
+    'database': os.getenv('TOURNAMENT_MYSQL_DATABASE') or os.getenv('MYSQL_DATABASE', 'tournament_bot'),
+    'user': os.getenv('TOURNAMENT_MYSQL_USER') or os.getenv('MYSQL_USER', 'tournament_bot'),
+    'password': os.getenv('TOURNAMENT_MYSQL_PASSWORD') or os.getenv('MYSQL_PASSWORD', ''),
     'charset': 'utf8mb4',
     'collation': 'utf8mb4_unicode_ci',
 }
