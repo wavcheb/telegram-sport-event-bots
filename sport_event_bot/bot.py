@@ -19,6 +19,11 @@ import gettext
 import parsedatetime
 import urllib.request
 from html.parser import HTMLParser
+from dotenv import load_dotenv
+
+# Load environment variables from .env file
+load_dotenv()
+
 from . import db_mysql as db
 from . import telegraph as tph
 import asyncio
@@ -737,12 +742,18 @@ async def main():
     logger.add(os.path.join(BOT_DIR, "logs", "logs.log"), level="INFO")
     logger.add(sys.stderr, level="WARNING")
 
-    try:
-        with open(os.path.join(BOT_DIR, 'token.txt'), encoding='utf-8') as f:
-            api_token = f.readline().strip()
-    except Exception as err:
-        logger.exception(err)
-        print("Can not read api_token from token.txt")
+    # Try environment variable first, then fall back to token.txt
+    api_token = os.getenv('TELEGRAM_BOT_TOKEN')
+    if not api_token:
+        try:
+            with open(os.path.join(BOT_DIR, 'token.txt'), encoding='utf-8') as f:
+                api_token = f.readline().strip()
+        except Exception as err:
+            logger.exception(err)
+            print("Set TELEGRAM_BOT_TOKEN env variable or create token.txt")
+            sys.exit(1)
+    if not api_token:
+        print("TELEGRAM_BOT_TOKEN is empty")
         sys.exit(1)
 
     application = Application.builder().token(api_token).build()

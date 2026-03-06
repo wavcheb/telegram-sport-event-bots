@@ -3,19 +3,24 @@
 Updated to support payment status for participants. Migrated from sqlite3 to MySQL.
 """
 
+import os
 import sys
 import datetime
 from typing import List, Optional, Set, Tuple
 from loguru import logger
 import mysql.connector
 from mysql.connector import Error
+from dotenv import load_dotenv
 
-# Connection settings (provided)
+# Load environment variables from .env file
+load_dotenv()
+
+# Connection settings from environment
 MYSQL_CFG = {
-    'host': 'localhost',
-    'database': 'DB',
-    'user': 'USER',
-    'password': 'PSWPSWPSW',
+    'host': os.getenv('MYSQL_HOST', 'localhost'),
+    'database': os.getenv('MYSQL_DATABASE', 'futsal_bot'),
+    'user': os.getenv('MYSQL_USER', 'futsal_bot'),
+    'password': os.getenv('MYSQL_PASSWORD', ''),
     'charset': 'utf8mb4',
     'collation': 'utf8mb4_unicode_ci',
     'autocommit': True,
