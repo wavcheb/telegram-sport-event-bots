@@ -200,3 +200,34 @@ msgid ""
 "This group members statistics (registrations and penalties)\n"
 msgstr ""
 
+#: bot.py
+msgid "💳 Payment link"
+msgstr ""
+
+#: bot.py
+msgid "Payments"
+msgstr ""
+
+#: bot.py
+msgid "Payment log"
+msgstr ""
+
+#: bot.py
+msgid "records"
+msgstr ""
+
+#: bot.py
+msgid "No payment records yet."
+msgstr ""
+
+#: bot.py
+msgid "probably for friend"
+msgstr ""
+
+#: bot.py
+msgid "probably for self"
+msgstr ""
+
+#: bot.py
+msgid "marked payment at"
+msgstr ""

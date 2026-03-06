@@ -1029,10 +1029,48 @@ async def edit_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         logger.exception(e)
         await update.message.reply_text(f"❌ Ошибка: {str(e)}")
 
+# ==================== PID File Lock ====================
+
+PID_FILE = os.path.join(BOT_DIR, "tournament_bot.pid")
+
+def check_pid_lock():
+    """Check if another instance is already running. Exit if so."""
+    if os.path.exists(PID_FILE):
+        try:
+            with open(PID_FILE, 'r') as f:
+                old_pid = int(f.read().strip())
+            # Check if process is still alive
+            os.kill(old_pid, 0)
+            # Process exists — another instance is running
+            logger.error(f"Another instance is already running (PID {old_pid}). Exiting.")
+            print(f"❌ Another instance is already running (PID {old_pid}). Exiting.")
+            sys.exit(1)
+        except (ProcessLookupError, ValueError):
+            # Process is dead or PID file is corrupt — safe to continue
+            pass
+        except PermissionError:
+            # Process exists but we can't signal it — assume it's running
+            logger.error("Another instance may be running (permission denied). Exiting.")
+            sys.exit(1)
+
+    # Write our PID
+    with open(PID_FILE, 'w') as f:
+        f.write(str(os.getpid()))
+
+def remove_pid_lock():
+    """Remove PID file on exit."""
+    try:
+        os.remove(PID_FILE)
+    except OSError:
+        pass
+
 # ==================== Main ====================
 
 async def main():
     """Main function"""
+    # Prevent duplicate instances
+    check_pid_lock()
+
     try:
         with open(os.path.join(BOT_DIR, 'token.txt'), encoding='utf-8') as f:
             api_token = f.readline().strip()
@@ -1079,7 +1117,7 @@ async def main():
     # Initialize and start bot manually
     await application.initialize()
     await application.start()
-    await application.updater.start_polling()
+    await application.updater.start_polling(drop_pending_updates=True)
     logger.info("Bot is running...")
 
     # Create stop event for graceful shutdown
@@ -1104,6 +1142,7 @@ async def main():
 async def shutdown(application, loop):
     """Gracefully shutdown the bot"""
     logger.info("Shutting down bot...")
+    remove_pid_lock()
     await application.updater.stop()
     await application.stop()
     await application.shutdown()
@@ -1121,5 +1160,6 @@ if __name__ == '__main__':
     except KeyboardInterrupt:
         pass
     finally:
+        remove_pid_lock()
         loop.run_until_complete(loop.shutdown_asyncgens())
         loop.close()
