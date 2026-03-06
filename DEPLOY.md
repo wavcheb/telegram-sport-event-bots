@@ -108,21 +108,24 @@ FLUSH PRIVILEGES;
 EXIT;
 ```
 
-Update configuration:
+Create `.env` file:
 ```bash
-nano sport_event_bot/db_mysql.py
+cp .env.example .env
+nano .env
 ```
 
-Change:
-```python
-MYSQL_CFG = {
-    'host': 'localhost',
-    'database': 'futsal_bot',
-    'user': 'futsal_bot',
-    'password': 'YOUR_STRONG_PASSWORD',  # ← Change this!
-    'charset': 'utf8mb4',
-    'collation': 'utf8mb4_unicode_ci',
-}
+Set your values:
+```
+TELEGRAM_BOT_TOKEN=your_bot_token_here
+MYSQL_HOST=localhost
+MYSQL_DATABASE=futsal_bot
+MYSQL_USER=futsal_bot
+MYSQL_PASSWORD=YOUR_STRONG_PASSWORD
+```
+
+Secure the file:
+```bash
+chmod 600 .env
 ```
 
 #### Tournament Bot Database
@@ -139,21 +142,13 @@ FLUSH PRIVILEGES;
 EXIT;
 ```
 
-Update configuration:
-```bash
-nano tournament_bot/db_tournament.py
+Configuration is read from `.env` file (same file as Sport Event Bot).
+Add tournament bot settings if using separate database:
 ```
-
-Change:
-```python
-MYSQL_CFG = {
-    'host': 'localhost',
-    'database': 'tournament_bot',
-    'user': 'tournament_bot',
-    'password': 'YOUR_STRONG_PASSWORD',  # ← Change this!
-    'charset': 'utf8mb4',
-    'collation': 'utf8mb4_unicode_ci',
-}
+TOURNAMENT_BOT_TOKEN=your_tournament_bot_token
+TOURNAMENT_MYSQL_DATABASE=tournament_bot
+TOURNAMENT_MYSQL_USER=tournament_bot
+TOURNAMENT_MYSQL_PASSWORD=your_password
 ```
 
 Initialize database:
@@ -163,25 +158,33 @@ python -m tournament_bot.db_tournament
 deactivate
 ```
 
-### 4. Add Bot Tokens
+### 4. Configure Bots
 
-#### Sport Event Bot
-```bash
-nano sport_event_bot/token.txt
-```
-Paste your bot token and save.
+Both bots read configuration from `.env` file in the project root:
 
-#### Tournament Bot
 ```bash
-nano tournament_bot/token.txt
+cp .env.example .env
+nano .env
 ```
-Paste your bot token and save.
 
-**Secure token files:**
-```bash
-chmod 600 sport_event_bot/token.txt
-chmod 600 tournament_bot/token.txt
+Set all required values:
 ```
+# Sport Event Bot
+TELEGRAM_BOT_TOKEN=your_sport_bot_token
+
+# Database (shared or separate)
+MYSQL_HOST=localhost
+MYSQL_DATABASE=futsal_bot
+MYSQL_USER=futsal_bot
+MYSQL_PASSWORD=your_secure_password
+```
+
+**Secure the config:**
+```bash
+chmod 600 .env
+```
+
+**Note:** For backward compatibility, bots also check `token.txt` files if env var is not set.
 
 ## 🧪 Test Run
 
@@ -243,6 +246,7 @@ After=network.target
 [Service]
 Type=simple
 WorkingDirectory=%h/tgbot
+EnvironmentFile=%h/tgbot/.env
 ExecStart=%h/tgbot/run_sport_event_bot.sh
 Restart=always
 RestartSec=10
@@ -270,6 +274,7 @@ After=network.target
 [Service]
 Type=simple
 WorkingDirectory=%h/tgbot
+EnvironmentFile=%h/tgbot/.env
 ExecStart=%h/tgbot/run_tournament_bot.sh
 Restart=always
 RestartSec=10
@@ -355,6 +360,7 @@ Type=simple
 User=YOUR_USERNAME
 Group=YOUR_USERNAME
 WorkingDirectory=/usr/local/tgbot
+EnvironmentFile=/usr/local/tgbot/.env
 ExecStart=/usr/local/tgbot/run_sport_event_bot.sh
 Restart=always
 RestartSec=10
@@ -389,6 +395,7 @@ Type=simple
 User=YOUR_USERNAME
 Group=YOUR_USERNAME
 WorkingDirectory=/usr/local/tgbot
+EnvironmentFile=/usr/local/tgbot/.env
 ExecStart=/usr/local/tgbot/run_tournament_bot.sh
 Restart=always
 RestartSec=10
@@ -451,7 +458,7 @@ tail -f tournament_bot/logs/tournament_bot.log
 ## 🔒 Security Checklist
 
 - [ ] Strong passwords for MySQL users
-- [ ] Token files have 600 permissions
+- [ ] `.env` file has 600 permissions
 - [ ] Bots run as non-root user
 - [ ] MySQL only accepts local connections
 - [ ] Regular system updates enabled
@@ -558,8 +565,8 @@ source sport_event_bot/venv/bin/activate
 python -m sport_event_bot.bot
 deactivate
 
-# Check token file
-cat sport_event_bot/token.txt | wc -c  # Should be around 45-50 chars
+# Check .env file
+grep TELEGRAM_BOT_TOKEN .env | wc -c  # Should show token is set
 ```
 
 ### Permission Errors
@@ -572,7 +579,7 @@ sudo chown -R $USER:$USER /usr/local/tgbot
 chmod 755 /usr/local/tgbot
 chmod 755 /usr/local/tgbot/sport_event_bot
 chmod 755 /usr/local/tgbot/tournament_bot
-chmod 600 /usr/local/tgbot/*/token.txt
+chmod 600 /usr/local/tgbot/.env
 chmod +x /usr/local/tgbot/*.sh
 chmod +x /usr/local/tgbot/*/setup_venv.sh
 ```

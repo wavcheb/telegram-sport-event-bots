@@ -55,33 +55,38 @@ GRANT ALL PRIVILEGES ON futsal_bot.* TO 'futsal_bot'@'localhost';
 FLUSH PRIVILEGES;
 ```
 
-Update database credentials in `sport_event_bot/db_mysql.py`:
-
-```python
-MYSQL_CFG = {
-    'host': 'localhost',
-    'database': 'futsal_bot',
-    'user': 'futsal_bot',
-    'password': 'your_password',
-    'charset': 'utf8mb4',
-    'collation': 'utf8mb4_unicode_ci',
-}
-```
+Database credentials are configured in `.env` file (see Step 4).
 
 The bot will automatically create tables on first run.
 
-### 4. Configure Bot Token
+### 4. Configure Environment
 
-Create `sport_event_bot/token.txt` file with your Telegram Bot Token:
+Create `.env` file from template:
 
 ```bash
-echo "YOUR_BOT_TOKEN" > sport_event_bot/token.txt
+cp .env.example .env
+nano .env
+```
+
+Set your values:
+
+```
+TELEGRAM_BOT_TOKEN=your_bot_token_here
+MYSQL_HOST=localhost
+MYSQL_DATABASE=futsal_bot
+MYSQL_USER=futsal_bot
+MYSQL_PASSWORD=your_password_here
 ```
 
 Get your token from [@BotFather](https://t.me/botfather):
 1. Send `/newbot` to BotFather
 2. Follow instructions to create your bot
-3. Copy the token and save it to `sport_event_bot/token.txt`
+3. Copy the token to `.env` file
+
+Secure the file:
+```bash
+chmod 600 .env
+```
 
 ### 5. Run the Bot
 
@@ -182,8 +187,8 @@ telegram-sport-event-bots/
 │   ├── bot.py               # Main bot logic and handlers
 │   ├── db_mysql.py          # Database operations
 │   ├── telegraph.py         # Telegraph API for payment logs
-│   ├── token.txt            # Bot token (create this)
-│   ├── token.txt.example    # Token file template
+├── .env.example             # Environment config template
+├── .env                     # Your config (create from .env.example)
 │   ├── babel.cfg            # Babel configuration for i18n
 │   ├── messages.pot         # Translation template
 │   ├── locale/              # Translation files
@@ -197,8 +202,8 @@ telegram-sport-event-bots/
 │   ├── bot.py               # Main bot logic
 │   ├── db_tournament.py     # Database operations
 │   ├── tournament_logic.py  # Tournament algorithms
-│   ├── token.txt            # Bot token (create this)
-│   ├── token.txt.example    # Token file template
+├── .env.example             # Environment config template
+├── .env                     # Your config (create from .env.example)
 │   └── logs/                # Log files
 ├── run_sport_event_bot.sh   # Sport Event Bot startup script
 ├── run_tournament_bot.sh    # Tournament Bot startup script

@@ -8,6 +8,7 @@ Type=simple
 User=YOUR_USERNAME
 Group=YOUR_USERNAME
 WorkingDirectory=/usr/local/tgbot
+EnvironmentFile=/usr/local/tgbot/.env
 ExecStart=/usr/local/tgbot/run_sport_event_bot.sh
 Restart=always
 RestartSec=10
