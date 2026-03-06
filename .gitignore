@@ -1,4 +1,5 @@
 token.txt
+.env
 *.log
 *.pickle
 *.db

@@ -68,25 +68,36 @@ Use [existing bot](https://t.me/nashtournamentbot) @nashtournamentbot or make ow
 
 3. **Configure databases**
 
-   Create databases and update credentials in `bot_name/db_*.py`:
+   Create databases:
    ```bash
-   # Sport Event Bot
    mysql -u root -p
    CREATE DATABASE futsal_bot CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
    CREATE USER 'futsal_bot'@'localhost' IDENTIFIED BY 'password';
    GRANT ALL PRIVILEGES ON futsal_bot.* TO 'futsal_bot'@'localhost';
 
-   # Tournament Bot
    CREATE DATABASE tournament_bot CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
    CREATE USER 'tournament_bot'@'localhost' IDENTIFIED BY 'password';
    GRANT ALL PRIVILEGES ON tournament_bot.* TO 'tournament_bot'@'localhost';
    ```
 
-4. **Add bot tokens**
+4. **Configure environment**
    ```bash
-   echo "YOUR_BOT_TOKEN" > sport_event_bot/token.txt
-   echo "YOUR_BOT_TOKEN" > tournament_bot/token.txt
-   chmod 600 sport_event_bot/token.txt tournament_bot/token.txt
+   cp .env.example .env
+   nano .env
+   ```
+
+   Set your values:
+   ```
+   TELEGRAM_BOT_TOKEN=your_sport_bot_token
+   MYSQL_HOST=localhost
+   MYSQL_DATABASE=futsal_bot
+   MYSQL_USER=futsal_bot
+   MYSQL_PASSWORD=your_password
+   ```
+
+   Secure the file:
+   ```bash
+   chmod 600 .env
    ```
 
 5. **Run the bots**
@@ -104,10 +115,11 @@ Use [existing bot](https://t.me/nashtournamentbot) @nashtournamentbot or make ow
 
 ```
 telegram-sport-event-bots/
+├── .env.example              # Environment config template
+├── .env                      # Your config (create from template)
 ├── sport_event_bot/          # Sport Event Bot
 │   ├── bot.py               # Main bot logic
 │   ├── db_mysql.py          # Database operations
-│   ├── token.txt            # Bot token (create this)
 │   ├── setup_venv.sh        # Virtual environment setup script
 │   ├── venv/                # Virtual environment (auto-created)
 │   ├── locale/              # Translations (RU, UK, PT, AR)
@@ -117,7 +129,6 @@ telegram-sport-event-bots/
 │   ├── bot.py               # Main bot logic
 │   ├── db_tournament.py     # Database operations
 │   ├── tournament_logic.py  # Tournament algorithms
-│   ├── token.txt            # Bot token (create this)
 │   ├── setup_venv.sh        # Virtual environment setup script
 │   ├── venv/                # Virtual environment (auto-created)
 │   ├── logs/                # Bot logs
@@ -134,10 +145,13 @@ telegram-sport-event-bots/
 
 ## 🔧 Configuration
 
+Configuration is centralized in `.env` file:
+- **TELEGRAM_BOT_TOKEN**: Bot token from @BotFather
+- **MYSQL_HOST/DATABASE/USER/PASSWORD**: Database credentials
+
 Each bot is completely independent:
 - **Separate virtual environments**: Each bot has its own `venv/` with isolated dependencies
 - **Separate databases**: Each bot uses its own MySQL database
-- **Separate tokens**: Each bot has its own `token.txt` file
 - **Separate logs**: Each bot writes to its own `logs/` directory
 - **Independent operation**: Bots can run simultaneously without conflicts
 
@@ -205,8 +219,8 @@ See [requirements.txt](requirements.txt) for full list of dependencies:
 
 ### General Issues
 
-- **Database connection fails**: Check MySQL credentials in `bot_name/db_*.py`
-- **Bot doesn't start**: Verify token in `bot_name/token.txt`
+- **Database connection fails**: Check MySQL credentials in `.env`
+- **Bot doesn't start**: Verify TELEGRAM_BOT_TOKEN in `.env`
 - **Permission errors**: Check file permissions with `chmod +x run_*.sh`
 
 ### Bot-Specific Issues

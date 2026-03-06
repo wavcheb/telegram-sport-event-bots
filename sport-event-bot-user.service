@@ -8,6 +8,7 @@ After=network.target
 [Service]
 Type=simple
 WorkingDirectory=%h/tgbot
+EnvironmentFile=%h/tgbot/.env
 ExecStart=%h/tgbot/run_sport_event_bot.sh
 Restart=always
 RestartSec=10

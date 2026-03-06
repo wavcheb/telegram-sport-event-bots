@@ -133,36 +133,31 @@ pip install --upgrade pip
 pip install -r requirements.txt
 ```
 
-### Configure Bot Token
+### Configure Environment
+
+Create `.env` file from template:
 
 ```bash
-cp sport_event_bot/token.txt.example sport_event_bot/token.txt
-nano sport_event_bot/token.txt  # or use your preferred editor
+cp .env.example .env
+nano .env
 ```
 
-Paste your bot token (from Step 2) and save:
-- In nano: `Ctrl+X`, then `Y`, then `Enter`
+Set your values:
 
-### Configure Database
+```
+TELEGRAM_BOT_TOKEN=1234567890:ABCdefGHI...  # From Step 2
+MYSQL_HOST=localhost
+MYSQL_DATABASE=futsal_bot
+MYSQL_USER=futsal_bot
+MYSQL_PASSWORD=your_secure_password
+```
 
+Save and secure:
 ```bash
-nano sport_event_bot/db_mysql.py
+chmod 600 .env
 ```
 
-Find the `MYSQL_CFG` dictionary (around line 13) and update:
-
-```python
-MYSQL_CFG = {
-    'host': 'localhost',
-    'database': 'futsal_bot',
-    'user': 'futsal_bot',
-    'password': 'your_secure_password',  # ← Change this
-    'charset': 'utf8mb4',
-    'collation': 'utf8mb4_unicode_ci',
-}
-```
-
-Save and exit.
+**Note:** For backward compatibility, the bot also checks `sport_event_bot/token.txt` if env var is not set.
 
 ## Step 5: Test Run
 
