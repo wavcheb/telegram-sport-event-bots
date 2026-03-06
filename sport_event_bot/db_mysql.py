@@ -667,11 +667,12 @@ def record_payment_log(chat_id: int, payer_user_id: int, for_friend: bool = Fals
     conn.close()
 
 def get_payment_log(chat_id: int) -> List[Tuple]:
-    """Return [(payer_user_id, paid_at, for_friend), ...] ordered by time."""
+    """Return [(display_name, paid_at, for_friend), ...] ordered by time."""
     conn = reconnect()
     cur = _exec(conn, '''
-        SELECT pl.payer_user_id, pl.paid_at, pl.for_friend
+        SELECT u.first_name, u.last_name, u.username, pl.paid_at, pl.for_friend
         FROM PaymentLog pl
+        LEFT JOIN Users u ON pl.payer_user_id = u.user_id
         WHERE pl.event_id = (
             SELECT event_id FROM Events WHERE status = "Open" AND chat_id = %s ORDER BY event_id DESC LIMIT 1
         )
@@ -679,7 +680,20 @@ def get_payment_log(chat_id: int) -> List[Tuple]:
     ''', (chat_id,))
     rows = cur.fetchall()
     conn.close()
-    return [(int(r[0]), r[1], bool(r[2])) for r in rows] if rows else []
+    result = []
+    for r in rows:
+        fnm = r[0] or ''
+        lnm = r[1] or ''
+        unm = r[2] or ''
+        name = " ".join([fnm, lnm]).strip()
+        if name and unm:
+            name = f"{name} ({unm})"
+        elif not name and unm:
+            name = unm
+        elif not name:
+            name = "Unknown"
+        result.append((name, r[3], bool(r[4])))
+    return result
 
 def has_user_invited_legioneer(chat_id: int, user_id: int) -> bool:
     """Check if user has invited any legioneer to the active event."""
