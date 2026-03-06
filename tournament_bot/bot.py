@@ -8,7 +8,13 @@ import sys
 import os
 import signal
 import asyncio
+from pathlib import Path
 from loguru import logger
+from dotenv import load_dotenv
+
+# Load .env from project root
+PROJECT_ROOT = Path(__file__).resolve().parent.parent
+load_dotenv(PROJECT_ROOT / '.env')
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup, ForceReply
 from telegram.ext import (
     Application,
@@ -1071,12 +1077,21 @@ async def main():
     # Prevent duplicate instances
     check_pid_lock()
 
-    try:
-        with open(os.path.join(BOT_DIR, 'token.txt'), encoding='utf-8') as f:
-            api_token = f.readline().strip()
-    except Exception as err:
-        logger.exception(err)
-        print("Can not read api_token from token.txt")
+    # Try to get token from environment first, fallback to token.txt
+    api_token = os.getenv('TOURNAMENT_BOT_TOKEN') or os.getenv('TELEGRAM_BOT_TOKEN')
+
+    if not api_token:
+        # Fallback to token.txt for backward compatibility
+        try:
+            with open(os.path.join(BOT_DIR, 'token.txt'), encoding='utf-8') as f:
+                api_token = f.readline().strip()
+        except Exception as err:
+            logger.exception(err)
+            print("Can not read api_token. Set TOURNAMENT_BOT_TOKEN in .env or create token.txt")
+            sys.exit(1)
+
+    if not api_token:
+        print("Error: Bot token is empty")
         sys.exit(1)
 
     # Initialize database
