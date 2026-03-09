@@ -257,6 +257,10 @@ msgid "Payments"
 msgstr "Оплаты"
 
 #: bot.py
+msgid "Current payments"
+msgstr "Текущие платежи"
+
+#: bot.py
 msgid "Payment log"
 msgstr "Отчёт об оплатах"
 
