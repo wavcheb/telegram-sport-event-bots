@@ -24,8 +24,13 @@ from dotenv import load_dotenv
 # Load environment variables from .env file
 load_dotenv()
 
-from . import db_mysql as db
-from . import telegraph as tph
+# Support both package mode and standalone mode
+try:
+    from . import db_mysql as db
+    from . import telegraph as tph
+except ImportError:
+    import db_mysql as db
+    import telegraph as tph
 import asyncio
 from typing import Optional, Callable
 from functools import wraps

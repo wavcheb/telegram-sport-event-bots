@@ -20,7 +20,11 @@ from dotenv import load_dotenv
 # Load environment variables from .env file
 load_dotenv()
 
-from . import db_mysql as db
+# Support both package mode and standalone mode
+try:
+    from . import db_mysql as db
+except ImportError:
+    import db_mysql as db
 
 # MAX Bot API imports
 from maxapi import Bot, Dispatcher

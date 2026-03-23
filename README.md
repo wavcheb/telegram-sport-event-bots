@@ -1,6 +1,6 @@
-# ⚽🏆 Telegram Sport Event Bots - Telegram Sports Bots Collection
+# ⚽🏆 Sport Event Bots - Multi-Platform Sports Bots Collection
 
-A comprehensive collection of Telegram bots for managing sports events and tournaments. Each bot is fully independent with its own configuration, database, and logs.
+A comprehensive collection of bots for managing sports events and tournaments across Telegram and MAX Messenger. Each bot is fully independent with its own configuration and can share a database for cross-platform features.
 
 ## 📦 Available Bots
 
@@ -30,6 +30,27 @@ Use [existing bot](https://t.me/nashtournamentbot) @nashtournamentbot or make ow
 - Early tournament finish option
 
 **[📖 Full Documentation](tournament_bot/README.md)**
+
+### 📱 MAX Sport Event Bot
+MAX Messenger bot for organizing sports events. Can link with Telegram Sport Event Bot for cross-platform participant management.
+
+**Key Features:**
+- Event management with participant registration
+- Payment tracking
+- Cross-platform chat linking with Telegram
+- Participant synchronization across platforms
+- Russian-only interface
+
+**[📖 Full Documentation](max_sporteventbot/README.md)**
+
+## 🔗 Cross-Platform Features
+
+Sport Event Bot (Telegram) and MAX Sport Event Bot can share a database and link chats:
+
+- **Shared Database**: Both bots use the same MySQL database with `platform` field separation
+- **Chat Linking**: Link Telegram and MAX chats with `/link` command
+- **Participant Sync**: See participants from both platforms in event messages
+- **Event Copy**: Sync participants between platforms with `/event_copy`
 
 ## 🚀 Quick Start
 
@@ -117,43 +138,73 @@ Use [existing bot](https://t.me/nashtournamentbot) @nashtournamentbot or make ow
 telegram-sport-event-bots/
 ├── .env.example              # Environment config template
 ├── .env                      # Your config (create from template)
-├── sport_event_bot/          # Sport Event Bot
+├── sport_event_bot/          # Telegram Sport Event Bot
 │   ├── bot.py               # Main bot logic
 │   ├── db_mysql.py          # Database operations
-│   ├── setup_venv.sh        # Virtual environment setup script
-│   ├── venv/                # Virtual environment (auto-created)
+│   ├── run.sh               # Standalone run script
+│   ├── setup_venv.sh        # Virtual environment setup
 │   ├── locale/              # Translations (RU, UK, PT, AR)
-│   ├── logs/                # Bot logs
+│   └── README.md            # Bot documentation
+├── max_sporteventbot/        # MAX Sport Event Bot
+│   ├── bot.py               # Main bot logic
+│   ├── db_mysql.py          # Database operations
+│   ├── run.sh               # Standalone run script
+│   ├── setup_venv.sh        # Virtual environment setup
+│   ├── requirements.txt     # MAX bot dependencies
 │   └── README.md            # Bot documentation
 ├── tournament_bot/           # Tournament Bot
 │   ├── bot.py               # Main bot logic
 │   ├── db_tournament.py     # Database operations
 │   ├── tournament_logic.py  # Tournament algorithms
-│   ├── setup_venv.sh        # Virtual environment setup script
-│   ├── venv/                # Virtual environment (auto-created)
-│   ├── logs/                # Bot logs
+│   ├── setup_venv.sh        # Virtual environment setup
 │   └── README.md            # Bot documentation
 ├── run_sport_event_bot.sh   # Sport Event Bot launcher
+├── run_max_sport_event_bot.sh # MAX Bot launcher
 ├── run_tournament_bot.sh    # Tournament Bot launcher
 ├── setup_all.sh             # Setup all bots at once
-├── requirements.txt          # Python dependencies
+├── requirements.txt         # Python dependencies
 ├── INSTALL.md               # Detailed installation guide
 ├── DEPLOY.md                # Production deployment guide
-├── *.service                # systemd service examples
 └── README.md                # This file
 ```
 
 ## 🔧 Configuration
 
 Configuration is centralized in `.env` file:
-- **TELEGRAM_BOT_TOKEN**: Bot token from @BotFather
+- **TELEGRAM_BOT_TOKEN**: Telegram bot token from @BotFather
+- **MAX_BOT_TOKEN**: MAX Messenger bot token
 - **MYSQL_HOST/DATABASE/USER/PASSWORD**: Database credentials
 
-Each bot is completely independent:
-- **Separate virtual environments**: Each bot has its own `venv/` with isolated dependencies
-- **Separate databases**: Each bot uses its own MySQL database
-- **Separate logs**: Each bot writes to its own `logs/` directory
-- **Independent operation**: Bots can run simultaneously without conflicts
+### Deployment Options
+
+**Option 1: Monorepo** - All bots in one directory
+```bash
+cd telegram-sport-event-bots
+./run_sport_event_bot.sh
+./run_max_sport_event_bot.sh
+```
+
+**Option 2: Standalone** - Each bot in separate directory
+```bash
+# Copy to separate directories
+cp -r sport_event_bot /usr/local/tgbot/sportevent
+cp -r max_sporteventbot /usr/local/maxbot/sporteventbot
+
+# Run standalone
+cd /usr/local/tgbot/sportevent && ./run.sh
+cd /usr/local/maxbot/sporteventbot && ./run.sh
+```
+
+### Shared Database for Cross-Platform
+
+For cross-platform features (chat linking, participant sync), use the same database:
+
+```env
+# Both bots use the same database
+MYSQL_DATABASE=futsal_bot
+```
+
+Bots are separated by `platform` field (`telegram` / `max`).
 
 ### Why Separate Virtual Environments?
 
@@ -165,9 +216,11 @@ Each bot is completely independent:
 
 ## 📚 Documentation
 
-- **[Sport Event Bot Documentation](sport_event_bot/README.md)** - Full guide for event management
-- **[Tournament Bot Documentation](tournament_bot/README.md)** - Full guide for tournament management
+- **[Sport Event Bot Documentation](sport_event_bot/README.md)** - Telegram bot for event management
+- **[MAX Sport Event Bot Documentation](max_sporteventbot/README.md)** - MAX Messenger bot for events
+- **[Tournament Bot Documentation](tournament_bot/README.md)** - Tournament management
 - **[Installation Guide](INSTALL.md)** - Step-by-step setup instructions
+- **[Deployment Guide](DEPLOY.md)** - Production deployment with systemd
 
 ## 🛠️ Development
 
