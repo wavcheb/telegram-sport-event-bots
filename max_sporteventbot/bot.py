@@ -39,6 +39,9 @@ from maxapi.types.attachments import InlineKeyboard
 BOT_DIR = os.path.dirname(os.path.abspath(__file__))
 LOCALE_DIR = os.path.join(BOT_DIR, 'locale')
 
+# Payments page URL from environment
+PAYMENTS_PAGE_URL = os.getenv('PAYMENTS_PAGE_URL', '').strip()
+
 # Translations setup
 TRANSLATIONS = {}
 try:
@@ -139,9 +142,20 @@ def create_event_full_text(this_chat_id: int, translate: Callable[[str], str],
             hours = round(delta.seconds / 3600)
             text += translate('Time left') + f': {delta.days} ' + translate('days') + ' ' + translate('and') + f' {hours} ' + translate('hours') + '\n'
 
-    # Payment link
+    # Links section
+    links = []
     if payment_url:
-        text += f'\n{translate("Payment link")}: {payment_url}\n'
+        links.append(f'{translate("Payment link")}: {payment_url}')
+    # Add payments page link if configured
+    if PAYMENTS_PAGE_URL:
+        try:
+            event_id = db.get_event_id_by_chat_id(this_chat_id)
+            payments_link = f'{PAYMENTS_PAGE_URL}?event={event_id}'
+            links.append(f'{translate("Current payments")}: {payments_link}')
+        except:
+            pass
+    if links:
+        text += '\n' + '\n'.join(links) + '\n'
 
     text += '\n' + translate('Players list') + ':\n'
     text_players = ''
@@ -303,9 +317,25 @@ async def cmd_event_add(event: MessageCreated):
             except:
                 continue
 
-    message_text = translate("New event created") + ":\n\n" + event_text
+    # First create event in database to get event_id
+    db.event_add(chat_id, event_text, datetime.datetime.now(), event_limit, 0, '')
     if payment_url:
-        message_text += f'\n\n{translate("Payment link")}: {payment_url}'
+        db.set_event_payment_url(chat_id, payment_url)
+
+    # Build message text with links
+    message_text = translate("New event created") + ":\n\n" + event_text
+    links = []
+    if payment_url:
+        links.append(f'{translate("Payment link")}: {payment_url}')
+    if PAYMENTS_PAGE_URL:
+        try:
+            event_id = db.get_event_id_by_chat_id(chat_id)
+            payments_link = f'{PAYMENTS_PAGE_URL}?event={event_id}'
+            links.append(f'{translate("Current payments")}: {payments_link}')
+        except:
+            pass
+    if links:
+        message_text += '\n\n' + '\n'.join(links)
 
     keyboard = InlineKeyboard(buttons=build_message_markup(translate))
     sent_msg = await event.bot.send_message(
@@ -315,9 +345,7 @@ async def cmd_event_add(event: MessageCreated):
     )
 
     msg_id = sent_msg.message.body.mid if sent_msg and sent_msg.message else 0
-    db.event_add(chat_id, event_text, datetime.datetime.now(), event_limit, msg_id, message_text)
-    if payment_url:
-        db.set_event_payment_url(chat_id, payment_url)
+    db.save_latest_bot_message(chat_id, msg_id, message_text)
 
 
 @dp.message_created(Command('event_remove'))

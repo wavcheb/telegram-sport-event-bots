@@ -40,6 +40,9 @@ from telegram.error import BadRequest
 BOT_DIR = os.path.dirname(os.path.abspath(__file__))
 LOCALE_DIR = os.path.join(BOT_DIR, 'locale')
 
+# Payments page URL from environment (replaces Telegraph if set)
+PAYMENTS_PAGE_URL = os.getenv('PAYMENTS_PAGE_URL', '').strip()
+
 # ==================== URL Metadata Parser ====================
 
 class _MetaExtractor(HTMLParser):
@@ -387,7 +390,15 @@ def create_event_full_text(this_chat_id: int, translate: Callable[[str], str],
     links = []
     if payment_url:
         links.append(f'<a href="{payment_url}">{translate("💳 Payment link")}</a>')
-    if telegraph_url:
+    # Use PAYMENTS_PAGE_URL if configured, otherwise fall back to Telegraph
+    if PAYMENTS_PAGE_URL:
+        try:
+            event_id = db.get_event_id_by_chat_id(this_chat_id)
+            payments_link = f'{PAYMENTS_PAGE_URL}?event={event_id}'
+            links.append(f'<a href="{payments_link}">{translate("Current payments")}</a>')
+        except:
+            pass
+    elif telegraph_url:
         links.append(f'<a href="{telegraph_url}">{translate("Current payments")}</a>')
     if links:
         text += ' | '.join(links) + '\n\n'
