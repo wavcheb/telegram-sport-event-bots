@@ -5,17 +5,15 @@
 # ---------------------------------------------------------------------------
 """MAX Messenger BOT for organizing events with participant registration.
 Adapted from Telegram Sport Event Bot for MAX messenger API.
+Russian-only version.
 """
 
 import sys
 import os
 import datetime
 import re
-import signal
-import gettext
 import asyncio
-from typing import Optional, Callable, List
-from functools import wraps
+from typing import Optional, List
 from loguru import logger
 from dotenv import load_dotenv
 
@@ -33,40 +31,13 @@ from maxapi.types import (
     Command,
     CallbackButton,
 )
-from maxapi.types.attachments import InlineKeyboard
+from maxapi.utils.inline_keyboard import InlineKeyboardBuilder
 
 # Bot directory paths
 BOT_DIR = os.path.dirname(os.path.abspath(__file__))
-LOCALE_DIR = os.path.join(BOT_DIR, 'locale')
 
 # Payments page URL from environment
 PAYMENTS_PAGE_URL = os.getenv('PAYMENTS_PAGE_URL', '').strip()
-
-# Translations setup
-TRANSLATIONS = {}
-try:
-    TRANSLATIONS['uk'] = gettext.translation('ua', localedir=LOCALE_DIR, languages=['uk']).gettext
-except FileNotFoundError:
-    pass
-try:
-    TRANSLATIONS['pt-br'] = gettext.translation('pt', localedir=LOCALE_DIR, languages=['pt_BR']).gettext
-except FileNotFoundError:
-    pass
-try:
-    TRANSLATIONS['ar'] = gettext.translation('ar', localedir=LOCALE_DIR, languages=['ar']).gettext
-except FileNotFoundError:
-    pass
-try:
-    TRANSLATIONS['ru'] = gettext.translation('ru', localedir=LOCALE_DIR, languages=['ru']).gettext
-except FileNotFoundError:
-    pass
-
-
-def get_translate_func(lang: str) -> Callable[[str], str]:
-    """Get translation function for given language."""
-    if lang in TRANSLATIONS:
-        return TRANSLATIONS[lang]
-    return lambda text: text
 
 
 def _coerce_to_datetime(val: object) -> Optional[datetime.datetime]:
@@ -86,102 +57,128 @@ def _coerce_to_datetime(val: object) -> Optional[datetime.datetime]:
     return None
 
 
-def new_chat_id_memoization(chat_id: int, lang: str, all_known_chat_ids=None):
+def new_chat_id_memoization(chat_id: int, all_known_chat_ids=None):
     """Register new chat if not already known."""
     if all_known_chat_ids is None:
         all_known_chat_ids = db.get_all_chat_ids()
     if chat_id not in all_known_chat_ids:
         all_known_chat_ids.add(chat_id)
-        db.register_new_chat_id(chat_id, lang or 'ru')
+        db.register_new_chat_id(chat_id, 'ru')
         logger.info(f'New chat_id: {chat_id}')
 
 
-def build_message_markup(translate_func: Callable[[str], str]) -> List[List[CallbackButton]]:
-    """Create inline keyboard buttons using translation function."""
-    rows = [
-        [CallbackButton(text=translate_func('+ Apply for participation'), payload='ADD')],
-        [CallbackButton(text=translate_func('- Revoke application'), payload='REMOVE')],
-        [CallbackButton(text=translate_func('+ Apply friend or legioneer'), payload='ADD_LEGIONEER')],
-        [CallbackButton(text=translate_func('- Remove last friend or legioneer'), payload='REMOVE_LEGIONEER')],
-        [CallbackButton(text=translate_func('Payment confirmed'), payload='PAY')],
-    ]
-    return rows
+def make_keyboard(*rows):
+    """Create inline keyboard from button rows. Returns Attachment or None."""
+    rows = [r for r in rows if r]
+    if not rows:
+        return None
+    kb = InlineKeyboardBuilder()
+    for row in rows:
+        kb.row(*row)
+    return kb.as_markup()
 
 
-def create_event_full_text(this_chat_id: int, translate: Callable[[str], str],
-                           payment_url: str = None) -> str:
-    """Create full event text with players list."""
-    def player_name_with_cards(games_registered, penalties, full_name, translator):
+def build_event_keyboard():
+    """Create inline keyboard buttons for event actions."""
+    return make_keyboard(
+        [CallbackButton(text='+ Записаться', payload='ADD')],
+        [CallbackButton(text='- Отписаться', payload='REMOVE')],
+        [CallbackButton(text='+ Добавить друга/легионера', payload='ADD_LEGIONEER')],
+        [CallbackButton(text='- Убрать последнего легионера', payload='REMOVE_LEGIONEER')],
+        [CallbackButton(text='Оплата подтверждена', payload='PAY')],
+    )
+
+
+def create_event_full_text(this_chat_id: int, payment_url: str = None) -> str:
+    """Create full event text with players list (Russian)."""
+    def player_name_with_cards(games_registered, penalties, full_name):
         printable_name = full_name
         games_played = games_registered - penalties
         if games_registered < 5 or not penalties:
             return printable_name
         ratio = games_played / games_registered
         if ratio < 0.9:
-            return f'{printable_name} (Played {games_played} from {games_registered})'
-        if ratio < 0.8:
-            return f'{printable_name} (Played {games_played} from {games_registered})'
-        if ratio < 0.7:
-            return f'{printable_name} (Played {games_played} from {games_registered})'
+            return f'{printable_name} (Сыграл {games_played} из {games_registered})'
         return printable_name
 
     event_title = db.get_event_text(this_chat_id) or ""
     text = '"' + event_title + '"\n'
     players_limit = db.get_event_limit(this_chat_id) or 0
     if players_limit:
-        text += translate('Players limit') + f': {players_limit}\n'
+        text += f'Лимит игроков: {players_limit}\n'
     raw_dt = db.get_event_datetime(this_chat_id)
     event_datetime = _coerce_to_datetime(raw_dt)
     if event_datetime:
-        text += translate('Event date and time') + f": {event_datetime.strftime('%Y-%m-%d, %H:%M')}\n"
+        text += f"Дата и время: {event_datetime.strftime('%Y-%m-%d, %H:%M')}\n"
         now = datetime.datetime.now()
         if event_datetime < now:
-            text += translate('Event time out') + '.\n'
+            text += 'Время события истекло.\n'
         else:
             delta = event_datetime - now
             hours = round(delta.seconds / 3600)
-            text += translate('Time left') + f': {delta.days} ' + translate('days') + ' ' + translate('and') + f' {hours} ' + translate('hours') + '\n'
+            text += f'Осталось: {delta.days} дн. и {hours} ч.\n'
 
     # Links section
     links = []
     if payment_url:
-        links.append(f'{translate("Payment link")}: {payment_url}')
-    # Add payments page link if configured
+        links.append(f'Ссылка для оплаты: {payment_url}')
     if PAYMENTS_PAGE_URL:
         try:
             event_id = db.get_event_id_by_chat_id(this_chat_id)
             payments_link = f'{PAYMENTS_PAGE_URL}?event={event_id}'
-            links.append(f'{translate("Current payments")}: {payments_link}')
+            links.append(f'Текущие платежи: {payments_link}')
         except:
             pass
     if links:
         text += '\n' + '\n'.join(links) + '\n'
 
-    text += '\n' + translate('Players list') + ':\n'
+    text += '\nСписок игроков:\n'
     text_players = ''
     players = db.get_event_users(this_chat_id) or []
+
+    # Get players from linked event if exists
+    linked_players = []
+    try:
+        event_id = db.get_event_id_by_chat_id(this_chat_id)
+        linked_players = db.get_linked_event_users(event_id)
+    except:
+        pass
+
+    # Show local players
     for n, user_id in enumerate(players, start=1):
         if players_limit and n == players_limit + 1:
-            text_players += '\n' + translate('Reserve') + ':\n'
+            text_players += '\nРезерв:\n'
         in_squad = '+' if not players_limit or n <= players_limit else '  '
         printable_name = db.compose_full_name(user_id)
         games_registered, penalties = db.get_chat_user_rp(this_chat_id, user_id)
         paid = db.get_payment_status(this_chat_id, user_id)
-        payment_mark = ' [paid]' if paid else ''
-        text_players += f'{in_squad} {n}. {player_name_with_cards(games_registered, penalties, printable_name, translate)}{payment_mark}\n'
+        payment_mark = ' [оплачено]' if paid else ''
+        text_players += f'{in_squad} {n}. {player_name_with_cards(games_registered, penalties, printable_name)}{payment_mark}\n'
+
+    # Show linked players
+    if linked_players:
+        start_n = len(players) + 1
+        for i, (user_id, platform, name) in enumerate(linked_players):
+            n = start_n + i
+            if players_limit and n == players_limit + 1:
+                text_players += '\nРезерв:\n'
+            in_squad = '+' if not players_limit or n <= players_limit else '  '
+            platform_mark = f' [{platform}]'
+            text_players += f'{in_squad} {n}. {name}{platform_mark}\n'
 
     text += text_players
+    total_players = len(players) + len(linked_players)
     canceled_players = db.get_event_revoked_users(this_chat_id) or []
     if canceled_players:
-        text += '\n' + translate('Revoked applications') + ':'
+        text += '\nОтказавшиеся:'
         for canceled_user_id in canceled_players:
             cancel_datetime = db.get_user_cancellation_datetime(this_chat_id, canceled_user_id)
             cd = _coerce_to_datetime(cancel_datetime)
             cd_txt = cd.strftime('%Y-%m-%d %H:%M') if cd else str(cancel_datetime)[:16]
             printable_name = db.compose_full_name(canceled_user_id)
             text += f'  {printable_name} - {cd_txt}\n'
-    elif not players:
-        text += '\n' + translate('No applications yet')
+    elif total_players == 0:
+        text += '\nПока нет заявок'
     safe = text.strip()
     return safe if safe else " "
 
@@ -203,10 +200,9 @@ dp = Dispatcher()
 @dp.bot_started()
 async def on_bot_started(event: BotStarted):
     """Handle bot start event - send welcome message."""
-    translate = get_translate_func('ru')
     await event.bot.send_message(
         chat_id=event.chat_id,
-        text=translate('Bot started! Use /help to see available commands.')
+        text='Бот запущен! Используйте /help для списка команд.'
     )
 
 
@@ -214,66 +210,68 @@ async def on_bot_started(event: BotStarted):
 async def cmd_start(event: MessageCreated):
     """Handle /start command."""
     chat_id = event.chat.chat_id
-    user = event.message.sender
-    lang = 'ru'  # MAX doesn't provide language_code, default to Russian
-    new_chat_id_memoization(chat_id, lang)
-    translate = get_translate_func(lang)
-
-    await event.message.answer(translate('Bot started! Use /help to see available commands.'))
+    new_chat_id_memoization(chat_id)
+    await event.message.answer('Бот запущен! Используйте /help для списка команд.')
 
 
 @dp.message_created(Command('help'))
 async def cmd_help(event: MessageCreated):
     """Handle /help command."""
-    chat_id = event.chat.chat_id
-    lang = db.get_chat_lang(chat_id) if chat_id in db.get_all_chat_ids() else 'ru'
-    translate = get_translate_func(lang)
+    help_text = """
+Доступные команды бота:
 
-    help_text = translate("""
-Available BOT commands:
-
-/event_add TEXT
-Register new event
+/event_add ТЕКСТ
+Создать новое событие
 
 /event_remove
-Remove open event
+Удалить текущее событие
 
-/event_update TEXT
-Change event description
+/event_update ТЕКСТ
+Изменить описание события
 
 /limit XX
-Set players limit
+Установить лимит игроков
 
 /info
-Show event details
+Показать информацию о событии
 
 /add
-Register yourself to the event
+Записаться на событие
 
 /remove
-Revoke your application
+Отписаться от события
 
 /add_leg
-Register another player (legioneer) to the event
+Добавить друга/легионера
 
 /rem_leg
-Revoke register for legioneer
+Убрать последнего легионера
 
 /pay
-Confirm payment for the event
+Подтвердить оплату
 
 /payments
-Show payment log for current event
+Показать лог оплат
 
 /fix
-Fix event statistics (increment participants counters)
+Зафиксировать статистику события
 
 /penalty USERID
-Increase someone's PENALTY counter
+Добавить штраф игроку
 
 /stat
-This group members statistics
-""")
+Статистика участников чата
+
+/link [КОД]
+Связать чат с другим мессенджером. Без КОД - генерирует код.
+С КОД - завершает связывание с чатом который сгенерировал код.
+
+/unlink
+Разорвать связь с другим чатом
+
+/event_copy
+Скопировать событие из связанного чата
+"""
     await event.message.answer(help_text)
 
 
@@ -282,18 +280,15 @@ async def cmd_event_add(event: MessageCreated):
     """Create new event."""
     chat_id = event.chat.chat_id
     user = event.message.sender
-    lang = db.get_chat_lang(chat_id) if chat_id in db.get_all_chat_ids() else 'ru'
-    new_chat_id_memoization(chat_id, lang)
-    translate = get_translate_func(lang)
-    db.set_chat_lang(chat_id, lang)
+    new_chat_id_memoization(chat_id)
 
     event_text = parse_cmd_arg(event.message.body.text or '')
     if not event_text:
-        await event.message.answer(translate('Error: Please provide an event description. Usage: /event_add TEXT'))
+        await event.message.answer('Ошибка: укажите описание события. Пример: /event_add Футбол в среду')
         return
 
     if db.get_event_text(chat_id):
-        await event.message.answer(translate('Error: An active event already exists. Close it with /event_remove first.'))
+        await event.message.answer('Ошибка: уже есть активное событие. Сначала удалите его командой /event_remove')
         return
 
     # Extract payment URL from event text
@@ -317,31 +312,31 @@ async def cmd_event_add(event: MessageCreated):
             except:
                 continue
 
-    # First create event in database to get event_id
+    # Create event in database
     db.event_add(chat_id, event_text, datetime.datetime.now(), event_limit, 0, '')
     if payment_url:
         db.set_event_payment_url(chat_id, payment_url)
 
     # Build message text with links
-    message_text = translate("New event created") + ":\n\n" + event_text
+    message_text = "Создано новое событие:\n\n" + event_text
     links = []
     if payment_url:
-        links.append(f'{translate("Payment link")}: {payment_url}')
+        links.append(f'Ссылка для оплаты: {payment_url}')
     if PAYMENTS_PAGE_URL:
         try:
             event_id = db.get_event_id_by_chat_id(chat_id)
             payments_link = f'{PAYMENTS_PAGE_URL}?event={event_id}'
-            links.append(f'{translate("Current payments")}: {payments_link}')
+            links.append(f'Текущие платежи: {payments_link}')
         except:
             pass
     if links:
         message_text += '\n\n' + '\n'.join(links)
 
-    keyboard = InlineKeyboard(buttons=build_message_markup(translate))
+    keyboard = build_event_keyboard()
     sent_msg = await event.bot.send_message(
         chat_id=chat_id,
         text=message_text,
-        attachments=[keyboard]
+        attachments=[keyboard] if keyboard else None
     )
 
     msg_id = sent_msg.message.body.mid if sent_msg and sent_msg.message else 0
@@ -352,20 +347,17 @@ async def cmd_event_add(event: MessageCreated):
 async def cmd_event_remove(event: MessageCreated):
     """Remove current event."""
     chat_id = event.chat.chat_id
-    lang = db.get_chat_lang(chat_id) if chat_id in db.get_all_chat_ids() else 'ru'
-    new_chat_id_memoization(chat_id, lang)
-    translate = get_translate_func(lang)
+    new_chat_id_memoization(chat_id)
 
     db.close_all_open_events_for_chat(chat_id)
-    await event.message.answer(translate('Event removed.'))
+    await event.message.answer('Событие удалено.')
 
 
 @dp.message_created(Command('event_update'))
 async def cmd_event_update(event: MessageCreated):
     """Update event description."""
     chat_id = event.chat.chat_id
-    lang = db.get_chat_lang(chat_id) if chat_id in db.get_all_chat_ids() else 'ru'
-    new_chat_id_memoization(chat_id, lang)
+    new_chat_id_memoization(chat_id)
 
     new_event_text = parse_cmd_arg(event.message.body.text or '')
     if new_event_text:
@@ -377,8 +369,7 @@ async def cmd_event_update(event: MessageCreated):
 async def cmd_limit(event: MessageCreated):
     """Set players limit."""
     chat_id = event.chat.chat_id
-    lang = db.get_chat_lang(chat_id) if chat_id in db.get_all_chat_ids() else 'ru'
-    new_chat_id_memoization(chat_id, lang)
+    new_chat_id_memoization(chat_id)
 
     try:
         new_limit = parse_cmd_arg(event.message.body.text or '')
@@ -396,22 +387,20 @@ async def cmd_info(event: MessageCreated):
 async def show_info_impl(event: MessageCreated):
     """Implementation of show info."""
     chat_id = event.chat.chat_id
-    lang = db.get_chat_lang(chat_id) if chat_id in db.get_all_chat_ids() else 'ru'
-    new_chat_id_memoization(chat_id, lang)
-    translate = get_translate_func(lang)
+    new_chat_id_memoization(chat_id)
 
     if not db.get_event_text(chat_id):
-        await event.message.answer(translate('No events'))
+        await event.message.answer('Нет активных событий')
         return
 
     payment_url = db.get_event_payment_url(chat_id)
-    event_text = create_event_full_text(chat_id, translate, payment_url).strip() or " "
+    event_text = create_event_full_text(chat_id, payment_url).strip() or " "
 
-    keyboard = InlineKeyboard(buttons=build_message_markup(translate))
+    keyboard = build_event_keyboard()
     sent_msg = await event.bot.send_message(
         chat_id=chat_id,
         text=event_text,
-        attachments=[keyboard]
+        attachments=[keyboard] if keyboard else None
     )
 
     msg_id = sent_msg.message.body.mid if sent_msg and sent_msg.message else 0
@@ -423,8 +412,7 @@ async def cmd_add(event: MessageCreated):
     """Add player to event."""
     chat_id = event.chat.chat_id
     user = event.message.sender
-    lang = db.get_chat_lang(chat_id) if chat_id in db.get_all_chat_ids() else 'ru'
-    new_chat_id_memoization(chat_id, lang)
+    new_chat_id_memoization(chat_id)
 
     if db.get_event_text(chat_id):
         db.add_or_update_user(user.user_id, user.name or '', '', user.username or '')
@@ -438,8 +426,7 @@ async def cmd_remove(event: MessageCreated):
     """Remove player from event."""
     chat_id = event.chat.chat_id
     user = event.message.sender
-    lang = db.get_chat_lang(chat_id) if chat_id in db.get_all_chat_ids() else 'ru'
-    new_chat_id_memoization(chat_id, lang)
+    new_chat_id_memoization(chat_id)
 
     if db.get_event_text(chat_id):
         db.add_or_update_user(user.user_id, user.name or '', '', user.username or '')
@@ -452,15 +439,12 @@ async def cmd_add_legioneer(event: MessageCreated):
     """Add legioneer to event."""
     chat_id = event.chat.chat_id
     user = event.message.sender
-    lang = db.get_chat_lang(chat_id) if chat_id in db.get_all_chat_ids() else 'ru'
-    new_chat_id_memoization(chat_id, lang)
-    translate = get_translate_func(lang)
+    new_chat_id_memoization(chat_id)
 
     if db.get_event_text(chat_id):
         db.apply_for_legioneer(chat_id, user.user_id)
         full_name = db.compose_full_name(user.user_id)
-        legion_text = translate('Guest player applied by %(full_name)s') % {'full_name': full_name}
-        await event.bot.send_message(chat_id=chat_id, text=legion_text)
+        await event.bot.send_message(chat_id=chat_id, text=f'Гость добавлен пользователем {full_name}')
         logger.info(f"Event - Legioneer applied in chat: {chat_id}")
     await show_info_impl(event)
 
@@ -470,17 +454,14 @@ async def cmd_remove_legioneer(event: MessageCreated):
     """Remove legioneer from event."""
     chat_id = event.chat.chat_id
     user = event.message.sender
-    lang = db.get_chat_lang(chat_id) if chat_id in db.get_all_chat_ids() else 'ru'
-    new_chat_id_memoization(chat_id, lang)
-    translate = get_translate_func(lang)
+    new_chat_id_memoization(chat_id)
 
     if db.get_event_text(chat_id):
         try:
             event_id = db.get_event_id_by_chat_id(chat_id)
             if event_id and db.get_legioneer_user(event_id) > 9:
                 full_name = db.compose_full_name(user.user_id)
-                legion_text = translate('Guest player was revoked by %(full_name)s') % {'full_name': full_name}
-                await event.bot.send_message(chat_id=chat_id, text=legion_text)
+                await event.bot.send_message(chat_id=chat_id, text=f'Гость удалён пользователем {full_name}')
         except:
             pass
         db.revoke_for_legioneer(chat_id)
@@ -492,15 +473,13 @@ async def cmd_remove_legioneer(event: MessageCreated):
 async def cmd_fix(event: MessageCreated):
     """Fix squad and record statistics."""
     chat_id = event.chat.chat_id
-    lang = db.get_chat_lang(chat_id) if chat_id in db.get_all_chat_ids() else 'ru'
-    new_chat_id_memoization(chat_id, lang)
-    translate = get_translate_func(lang)
+    new_chat_id_memoization(chat_id)
 
     if not db.get_event_text(chat_id):
-        await event.message.answer(translate('No events to fix stat for'))
+        await event.message.answer('Нет событий для фиксации статистики')
         return
 
-    text = translate('Current statistics for this chat room members:') + '\n'
+    text = 'Текущая статистика участников чата:\n'
     players_limit = db.get_event_limit(chat_id)
     for position, userid in enumerate(db.get_event_users(chat_id), start=1):
         if not players_limit or position <= players_limit:
@@ -521,16 +500,21 @@ async def cmd_pay(event: MessageCreated):
     """Confirm payment for the event."""
     chat_id = event.chat.chat_id
     user = event.message.sender
-    lang = db.get_chat_lang(chat_id) if chat_id in db.get_all_chat_ids() else 'ru'
-    new_chat_id_memoization(chat_id, lang)
-    translate = get_translate_func(lang)
+    new_chat_id_memoization(chat_id)
 
     if not db.get_event_text(chat_id):
-        await event.message.answer(translate('No active event found.'))
+        await event.message.answer('Нет активного события.')
         return
 
     result = db.process_payment(chat_id, user.user_id)
-    await event.message.answer(translate(result['message']))
+    # Translate result message
+    msg_map = {
+        'You must be registered for the event to confirm payment.': 'Вы должны быть записаны на событие для подтверждения оплаты.',
+        'Payment confirmed!': 'Оплата подтверждена!',
+        'Payment for friend confirmed!': 'Оплата за друга подтверждена!',
+        'Payment already confirmed.': 'Оплата уже подтверждена.',
+    }
+    await event.message.answer(msg_map.get(result['message'], result['message']))
     if result['success']:
         await show_info_impl(event)
 
@@ -539,28 +523,26 @@ async def cmd_pay(event: MessageCreated):
 async def cmd_payments(event: MessageCreated):
     """Show payment log for current event."""
     chat_id = event.chat.chat_id
-    lang = db.get_chat_lang(chat_id) if chat_id in db.get_all_chat_ids() else 'ru'
-    new_chat_id_memoization(chat_id, lang)
-    translate = get_translate_func(lang)
+    new_chat_id_memoization(chat_id)
 
     event_title = db.get_event_text(chat_id)
     if not event_title:
-        await event.message.answer(translate('No active event found.'))
+        await event.message.answer('Нет активного события.')
         return
 
     entries = db.get_payment_log(chat_id)
     if not entries:
-        await event.message.answer(translate('No payment records yet.'))
+        await event.message.answer('Пока нет записей об оплате.')
         return
 
-    lines = [translate("Payment log") + ':\n']
+    lines = ['Лог оплат:\n']
     for name, paid_at, for_friend in entries:
         if hasattr(paid_at, 'strftime'):
             time_str = paid_at.strftime('%H:%M')
         else:
             time_str = str(paid_at)[:5]
-        note = f' ({translate("probably for friend")})' if for_friend else f' ({translate("probably for self")})'
-        lines.append(f'- {name} {translate("marked payment at")} {time_str}{note}')
+        note = ' (вероятно за друга)' if for_friend else ' (вероятно за себя)'
+        lines.append(f'- {name} отметил оплату в {time_str}{note}')
 
     await event.message.answer('\n'.join(lines))
 
@@ -570,55 +552,148 @@ async def cmd_penalty(event: MessageCreated):
     """Apply penalty to a user."""
     chat_id = event.chat.chat_id
     user = event.message.sender
-    lang = db.get_chat_lang(chat_id) if chat_id in db.get_all_chat_ids() else 'ru'
-    new_chat_id_memoization(chat_id, lang)
-    translate = get_translate_func(lang)
+    new_chat_id_memoization(chat_id)
 
     user_id_str = parse_cmd_arg(event.message.body.text or '')
     if not user_id_str:
-        await event.message.answer(translate('Error: Please provide a user ID. Usage: /penalty USERID'))
+        await event.message.answer('Ошибка: укажите ID пользователя. Пример: /penalty 123456')
         return
 
     try:
         user_id_int = int(user_id_str)
     except ValueError:
-        await event.message.answer(translate('Error: User ID must be a number, not a username. Usage: /penalty USERID'))
+        await event.message.answer('Ошибка: ID пользователя должен быть числом. Пример: /penalty 123456')
         logger.warning(f"Invalid user_id format: {user_id_str}. Expected integer.")
         return
 
     try:
         db.penalty_for_user_in_chat(chat_id, user_id_int, user.user_id)
         full_name = db.compose_full_name(user_id_int)
-        penalty_text = translate('The player %(full_name)s was handed a yellow card for non-appearance') % {'full_name': full_name}
-        await event.bot.send_message(chat_id=chat_id, text=penalty_text)
+        await event.bot.send_message(chat_id=chat_id, text=f'Игроку {full_name} выписан штраф за неявку')
         logger.info(f"Penalty applied to user {user_id_int} in chat {chat_id}")
     except Exception as e:
         logger.exception(e)
-        await event.message.answer(translate('Error applying penalty.'))
+        await event.message.answer('Ошибка при добавлении штрафа.')
 
 
 @dp.message_created(Command('stat'))
 async def cmd_stat(event: MessageCreated):
     """Show statistics."""
     chat_id = event.chat.chat_id
-    lang = db.get_chat_lang(chat_id) if chat_id in db.get_all_chat_ids() else 'ru'
-    new_chat_id_memoization(chat_id, lang)
-    translate = get_translate_func(lang)
+    new_chat_id_memoization(chat_id)
 
     all_userids = db.get_only_chat_participants(chat_id)
     if not all_userids:
         return
 
-    text = translate('Current statistics for this chat room members:') + '\n'
-    text += translate('Registrations / Penalties') + '\n'
+    text = 'Текущая статистика участников чата:\n'
+    text += 'Регистрации / Штрафы\n'
     for userid in all_userids:
         if userid < 30:
             continue
         printable_name = db.compose_full_name(userid)
         registered, penalties = db.get_chat_user_rp(chat_id, userid)
-        text += f"ID:{userid}, {registered:>2}/{penalties}, Full Name: {printable_name}\n"
+        text += f"ID:{userid}, {registered:>2}/{penalties}, Имя: {printable_name}\n"
 
     await event.bot.send_message(chat_id=chat_id, text=text)
+
+
+@dp.message_created(Command('link'))
+async def cmd_link(event: MessageCreated):
+    """Link this chat with another platform chat."""
+    chat_id = event.chat.chat_id
+    new_chat_id_memoization(chat_id)
+
+    # Check if already linked
+    linked = db.get_linked_chat(chat_id)
+    if linked:
+        linked_chat_id, linked_platform = linked
+        await event.message.answer(
+            f'Этот чат уже связан с {linked_platform} (чат {linked_chat_id}).\n'
+            f'Используйте /unlink чтобы разорвать связь.'
+        )
+        return
+
+    # Check for secret argument
+    arg = parse_cmd_arg(event.message.body.text or '')
+    if arg:
+        secret = arg.strip().upper()
+        result = db.complete_chat_link(chat_id, secret)
+        if result:
+            linked_chat_id, linked_platform = result
+            await event.message.answer(
+                f'✅ Чаты успешно связаны!\n'
+                f'Связан с {linked_platform} (чат {linked_chat_id})'
+            )
+        else:
+            await event.message.answer('❌ Неверный или устаревший код связки.')
+        return
+
+    # Generate new secret
+    secret = db.create_chat_link(chat_id)
+    await event.message.answer(
+        f'🔗 Код для связки сгенерирован:\n\n'
+        f'{secret}\n\n'
+        f'Отправьте этот код в чат другого мессенджера командой /link'
+    )
+
+
+@dp.message_created(Command('unlink'))
+async def cmd_unlink(event: MessageCreated):
+    """Remove link with another platform chat."""
+    chat_id = event.chat.chat_id
+    new_chat_id_memoization(chat_id)
+
+    if db.unlink_chat(chat_id):
+        await event.message.answer('✅ Связь с другим чатом разорвана.')
+    else:
+        await event.message.answer('Этот чат не связан с другим чатом.')
+
+
+@dp.message_created(Command('event_copy'))
+async def cmd_event_copy(event: MessageCreated):
+    """Copy event from linked chat."""
+    chat_id = event.chat.chat_id
+    new_chat_id_memoization(chat_id)
+
+    # Check if linked
+    linked = db.get_linked_chat(chat_id)
+    if not linked:
+        await event.message.answer('❌ Этот чат не связан с другим чатом. Используйте /link сначала.')
+        return
+
+    linked_chat_id, linked_platform = linked
+
+    # Check if already have active event
+    if db.get_event_text(chat_id):
+        await event.message.answer('Ошибка: уже есть активное событие. Сначала удалите его командой /event_remove')
+        return
+
+    # Get event from linked chat
+    linked_event = db.get_event_from_linked_chat(linked_chat_id, linked_platform)
+    if not linked_event:
+        await event.message.answer(f'❌ В связанном чате ({linked_platform}) нет активного события.')
+        return
+
+    linked_event_id, description, event_datetime, players_limit = linked_event
+
+    # Create local event
+    db.event_add(chat_id, description, datetime.datetime.now(), players_limit, 0, '')
+
+    # Get local event id and link events
+    local_event_id = db.get_event_id_by_chat_id(chat_id)
+    db.create_event_link(linked_event_id, local_event_id)
+
+    # Show the event
+    message_text = f"📋 Событие скопировано из {linked_platform}:\n\n" + description
+    keyboard = build_event_keyboard()
+    sent_msg = await event.bot.send_message(
+        chat_id=chat_id,
+        text=message_text,
+        attachments=[keyboard] if keyboard else None
+    )
+    msg_id = sent_msg.message.body.mid if sent_msg and sent_msg.message else 0
+    db.save_latest_bot_message(chat_id, msg_id, message_text)
 
 
 @dp.message_callback()
@@ -627,9 +702,6 @@ async def handle_callback(event: MessageCallback):
     chat_id = event.message.recipient.chat_id
     user = event.callback.user
     callback_data = event.callback.payload
-
-    lang = db.get_chat_lang(chat_id) if chat_id in db.get_all_chat_ids() else 'ru'
-    translate = get_translate_func(lang)
 
     db.add_or_update_user(user.user_id, user.name or '', '', user.username or '')
 
@@ -640,35 +712,38 @@ async def handle_callback(event: MessageCallback):
     elif callback_data == "ADD_LEGIONEER":
         db.apply_for_legioneer(chat_id, user.user_id)
         full_name = db.compose_full_name(user.user_id)
-        legion_text = translate('Guest player applied by %(full_name)s') % {'full_name': full_name}
-        await event.bot.send_message(chat_id=chat_id, text=legion_text)
+        await event.bot.send_message(chat_id=chat_id, text=f'Гость добавлен пользователем {full_name}')
     elif callback_data == "REMOVE_LEGIONEER":
         db.revoke_for_legioneer(chat_id)
         try:
             full_name = db.compose_full_name(user.user_id)
             event_id = db.get_event_id_by_chat_id(chat_id)
             if event_id and db.get_legioneer_user(event_id) > 9:
-                legion_text = translate('Guest player was revoked by %(full_name)s') % {'full_name': full_name}
-                await event.bot.send_message(chat_id=chat_id, text=legion_text)
+                await event.bot.send_message(chat_id=chat_id, text=f'Гость удалён пользователем {full_name}')
         except:
             pass
     elif callback_data == "PAY":
         result = db.process_payment(chat_id, user.user_id)
-        # Send notification about payment result
-        await event.bot.send_message(chat_id=chat_id, text=translate(result['message']))
+        msg_map = {
+            'You must be registered for the event to confirm payment.': 'Вы должны быть записаны на событие для подтверждения оплаты.',
+            'Payment confirmed!': 'Оплата подтверждена!',
+            'Payment for friend confirmed!': 'Оплата за друга подтверждена!',
+            'Payment already confirmed.': 'Оплата уже подтверждена.',
+        }
+        await event.bot.send_message(chat_id=chat_id, text=msg_map.get(result['message'], result['message']))
 
     # Update message with new player list
     payment_url = db.get_event_payment_url(chat_id)
-    message_text = create_event_full_text(chat_id, translate, payment_url)
+    message_text = create_event_full_text(chat_id, payment_url)
     safe_text = (message_text or "").strip() or " "
 
-    keyboard = InlineKeyboard(buttons=build_message_markup(translate))
+    keyboard = build_event_keyboard()
 
     try:
         await event.bot.edit_message(
             message_id=event.message.body.mid,
             text=safe_text,
-            attachments=[keyboard]
+            attachments=[keyboard] if keyboard else None
         )
         db.save_latest_bot_message(chat_id, event.message.body.mid, safe_text)
     except Exception as e:
@@ -677,7 +752,7 @@ async def handle_callback(event: MessageCallback):
         sent_msg = await event.bot.send_message(
             chat_id=chat_id,
             text=safe_text,
-            attachments=[keyboard]
+            attachments=[keyboard] if keyboard else None
         )
         msg_id = sent_msg.message.body.mid if sent_msg and sent_msg.message else 0
         db.save_latest_bot_message(chat_id, msg_id, safe_text)
