@@ -419,7 +419,7 @@ async def cmd_add(event: MessageCreated):
     new_chat_id_memoization(chat_id)
 
     if db.get_event_text(chat_id):
-        db.add_or_update_user(user.user_id, user.name or '', '', user.username or '')
+        db.add_or_update_user(user.user_id, user.first_name or '', '', user.username or '')
         db.apply_for_participation_in_the_event(chat_id, user.user_id)
         logger.info(f"Event - Player applied: {user.user_id}")
     await show_info_impl(event)
@@ -433,7 +433,7 @@ async def cmd_remove(event: MessageCreated):
     new_chat_id_memoization(chat_id)
 
     if db.get_event_text(chat_id):
-        db.add_or_update_user(user.user_id, user.name or '', '', user.username or '')
+        db.add_or_update_user(user.user_id, user.first_name or '', '', user.username or '')
         db.revoke_application_for_the_event(chat_id, user.user_id)
     await show_info_impl(event)
 
@@ -703,43 +703,18 @@ async def cmd_event_copy(event: MessageCreated):
 @dp.message_callback()
 async def handle_callback(event: MessageCallback):
     """Handle inline button callbacks."""
-    # Debug: log the entire callback event structure
-    logger.info(f"Callback event: {event}")
-    logger.info(f"Callback event.message: {event.message}")
-    logger.info(f"Callback event.callback: {event.callback}")
-
-    # Try different ways to get chat_id
-    chat_id = None
-    try:
-        chat_id = event.message.recipient.chat_id
-        logger.info(f"chat_id from recipient: {chat_id}")
-    except Exception as e:
-        logger.warning(f"Failed to get chat_id from recipient: {e}")
-
-    if not chat_id:
-        try:
-            chat_id = event.chat.chat_id
-            logger.info(f"chat_id from event.chat: {chat_id}")
-        except Exception as e:
-            logger.warning(f"Failed to get chat_id from event.chat: {e}")
-
-    if not chat_id:
-        logger.error("Could not determine chat_id from callback!")
-        return
-
+    # Get chat_id from message recipient
+    chat_id = event.message.recipient.chat_id
     user = event.callback.user
     callback_data = event.callback.payload
 
-    logger.info(f"Processing callback: chat_id={chat_id}, user={user.user_id}, action={callback_data}")
+    logger.info(f"Callback: chat_id={chat_id}, user={user.user_id}, action={callback_data}")
 
     try:
-        db.add_or_update_user(user.user_id, user.name or '', '', user.username or '')
-        logger.info(f"User {user.user_id} added/updated")
+        db.add_or_update_user(user.user_id, user.first_name or '', '', user.username or '')
 
         if callback_data == "ADD":
-            logger.info(f"Calling apply_for_participation_in_the_event({chat_id}, {user.user_id})")
             db.apply_for_participation_in_the_event(chat_id, user.user_id)
-            logger.info("apply_for_participation completed")
         elif callback_data == "REMOVE":
             db.revoke_application_for_the_event(chat_id, user.user_id)
         elif callback_data == "ADD_LEGIONEER":
@@ -768,10 +743,8 @@ async def handle_callback(event: MessageCallback):
         logger.exception(f"Error processing callback action: {e}")
 
     # Update message with new player list
-    logger.info("Getting event info for message update")
     payment_url = db.get_event_payment_url(chat_id)
     message_text = create_event_full_text(chat_id, payment_url)
-    logger.info(f"Event text length: {len(message_text) if message_text else 0}")
     safe_text = (message_text or "").strip() or " "
 
     keyboard = build_event_keyboard()
