@@ -703,9 +703,34 @@ async def cmd_event_copy(event: MessageCreated):
 @dp.message_callback()
 async def handle_callback(event: MessageCallback):
     """Handle inline button callbacks."""
-    chat_id = event.message.recipient.chat_id
+    # Debug: log the entire callback event structure
+    logger.info(f"Callback event: {event}")
+    logger.info(f"Callback event.message: {event.message}")
+    logger.info(f"Callback event.callback: {event.callback}")
+
+    # Try different ways to get chat_id
+    chat_id = None
+    try:
+        chat_id = event.message.recipient.chat_id
+        logger.info(f"chat_id from recipient: {chat_id}")
+    except Exception as e:
+        logger.warning(f"Failed to get chat_id from recipient: {e}")
+
+    if not chat_id:
+        try:
+            chat_id = event.chat.chat_id
+            logger.info(f"chat_id from event.chat: {chat_id}")
+        except Exception as e:
+            logger.warning(f"Failed to get chat_id from event.chat: {e}")
+
+    if not chat_id:
+        logger.error("Could not determine chat_id from callback!")
+        return
+
     user = event.callback.user
     callback_data = event.callback.payload
+
+    logger.info(f"Processing callback: chat_id={chat_id}, user={user.user_id}, action={callback_data}")
 
     db.add_or_update_user(user.user_id, user.name or '', '', user.username or '')
 
