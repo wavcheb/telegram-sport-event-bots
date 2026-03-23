@@ -732,38 +732,46 @@ async def handle_callback(event: MessageCallback):
 
     logger.info(f"Processing callback: chat_id={chat_id}, user={user.user_id}, action={callback_data}")
 
-    db.add_or_update_user(user.user_id, user.name or '', '', user.username or '')
+    try:
+        db.add_or_update_user(user.user_id, user.name or '', '', user.username or '')
+        logger.info(f"User {user.user_id} added/updated")
 
-    if callback_data == "ADD":
-        db.apply_for_participation_in_the_event(chat_id, user.user_id)
-    elif callback_data == "REMOVE":
-        db.revoke_application_for_the_event(chat_id, user.user_id)
-    elif callback_data == "ADD_LEGIONEER":
-        db.apply_for_legioneer(chat_id, user.user_id)
-        full_name = db.compose_full_name(user.user_id)
-        await event.bot.send_message(chat_id=chat_id, text=f'Гость добавлен пользователем {full_name}')
-    elif callback_data == "REMOVE_LEGIONEER":
-        db.revoke_for_legioneer(chat_id)
-        try:
+        if callback_data == "ADD":
+            logger.info(f"Calling apply_for_participation_in_the_event({chat_id}, {user.user_id})")
+            db.apply_for_participation_in_the_event(chat_id, user.user_id)
+            logger.info("apply_for_participation completed")
+        elif callback_data == "REMOVE":
+            db.revoke_application_for_the_event(chat_id, user.user_id)
+        elif callback_data == "ADD_LEGIONEER":
+            db.apply_for_legioneer(chat_id, user.user_id)
             full_name = db.compose_full_name(user.user_id)
-            event_id = db.get_event_id_by_chat_id(chat_id)
-            if event_id and db.get_legioneer_user(event_id) > 9:
-                await event.bot.send_message(chat_id=chat_id, text=f'Гость удалён пользователем {full_name}')
-        except:
-            pass
-    elif callback_data == "PAY":
-        result = db.process_payment(chat_id, user.user_id)
-        msg_map = {
-            'You must be registered for the event to confirm payment.': 'Вы должны быть записаны на событие для подтверждения оплаты.',
-            'Payment confirmed!': 'Оплата подтверждена!',
-            'Payment for friend confirmed!': 'Оплата за друга подтверждена!',
-            'Payment already confirmed.': 'Оплата уже подтверждена.',
-        }
-        await event.bot.send_message(chat_id=chat_id, text=msg_map.get(result['message'], result['message']))
+            await event.bot.send_message(chat_id=chat_id, text=f'Гость добавлен пользователем {full_name}')
+        elif callback_data == "REMOVE_LEGIONEER":
+            db.revoke_for_legioneer(chat_id)
+            try:
+                full_name = db.compose_full_name(user.user_id)
+                event_id = db.get_event_id_by_chat_id(chat_id)
+                if event_id and db.get_legioneer_user(event_id) > 9:
+                    await event.bot.send_message(chat_id=chat_id, text=f'Гость удалён пользователем {full_name}')
+            except:
+                pass
+        elif callback_data == "PAY":
+            result = db.process_payment(chat_id, user.user_id)
+            msg_map = {
+                'You must be registered for the event to confirm payment.': 'Вы должны быть записаны на событие для подтверждения оплаты.',
+                'Payment confirmed!': 'Оплата подтверждена!',
+                'Payment for friend confirmed!': 'Оплата за друга подтверждена!',
+                'Payment already confirmed.': 'Оплата уже подтверждена.',
+            }
+            await event.bot.send_message(chat_id=chat_id, text=msg_map.get(result['message'], result['message']))
+    except Exception as e:
+        logger.exception(f"Error processing callback action: {e}")
 
     # Update message with new player list
+    logger.info("Getting event info for message update")
     payment_url = db.get_event_payment_url(chat_id)
     message_text = create_event_full_text(chat_id, payment_url)
+    logger.info(f"Event text length: {len(message_text) if message_text else 0}")
     safe_text = (message_text or "").strip() or " "
 
     keyboard = build_event_keyboard()

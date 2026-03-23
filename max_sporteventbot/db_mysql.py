@@ -32,9 +32,7 @@ MYSQL_CFG = {
     'use_unicode': True,
 }
 
-logger.remove()
-logger.add("logs.log", level="DEBUG")
-logger.add(sys.stderr, level="DEBUG")
+# Note: logger is configured by bot.py, don't reconfigure here
 
 def reconnect():
     """Open a new MySQL connection with provided settings"""
