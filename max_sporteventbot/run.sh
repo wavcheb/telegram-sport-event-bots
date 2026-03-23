@@ -20,16 +20,7 @@ else
     echo "Warning: No virtual environment found. Using system Python."
 fi
 
-# Load environment variables from .env (in current dir or parent)
-if [ -f ".env" ]; then
-    set -a
-    source .env
-    set +a
-elif [ -f "../.env" ]; then
-    set -a
-    source ../.env
-    set +a
-fi
+# Note: .env is loaded by python-dotenv in bot.py
 
 echo "Starting MAX Sport Event Bot..."
 exec python bot.py "$@"
