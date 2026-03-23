@@ -632,6 +632,217 @@ def create_table_payment_log():
     conn.commit()
     conn.close()
 
+
+def create_table_chat_links():
+    """Create table for linking chats across platforms."""
+    conn = reconnect()
+    _exec(conn, '''
+        CREATE TABLE IF NOT EXISTS ChatLinks (
+            link_id BIGINT NOT NULL AUTO_INCREMENT,
+            chat_id_1 BIGINT NOT NULL,
+            platform_1 VARCHAR(16) NOT NULL,
+            chat_id_2 BIGINT DEFAULT NULL,
+            platform_2 VARCHAR(16) DEFAULT NULL,
+            link_secret VARCHAR(32) NOT NULL,
+            created_at DATETIME NOT NULL,
+            linked_at DATETIME DEFAULT NULL,
+            PRIMARY KEY (link_id),
+            UNIQUE KEY uq_link_secret (link_secret),
+            KEY idx_chat1 (chat_id_1, platform_1),
+            KEY idx_chat2 (chat_id_2, platform_2)
+        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+    ''')
+    conn.commit()
+    conn.close()
+
+
+def create_table_event_links():
+    """Create table for linking events across platforms."""
+    conn = reconnect()
+    _exec(conn, '''
+        CREATE TABLE IF NOT EXISTS EventLinks (
+            link_id BIGINT NOT NULL AUTO_INCREMENT,
+            event_id_1 BIGINT NOT NULL,
+            event_id_2 BIGINT NOT NULL,
+            created_at DATETIME NOT NULL,
+            PRIMARY KEY (link_id),
+            UNIQUE KEY uq_event_pair (event_id_1, event_id_2),
+            KEY idx_event1 (event_id_1),
+            KEY idx_event2 (event_id_2)
+        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+    ''')
+    conn.commit()
+    conn.close()
+
+
+def generate_link_secret() -> str:
+    """Generate a random secret for chat linking."""
+    import secrets
+    return secrets.token_hex(4).upper()  # 8 characters
+
+
+def create_chat_link(chat_id: int) -> str:
+    """Create a pending link for this chat. Returns the secret."""
+    conn = reconnect()
+    secret = generate_link_secret()
+    now = datetime.datetime.now()
+    _exec(conn, '''
+        INSERT INTO ChatLinks (chat_id_1, platform_1, link_secret, created_at)
+        VALUES (%s, %s, %s, %s)
+    ''', (chat_id, PLATFORM, secret, now))
+    conn.commit()
+    conn.close()
+    return secret
+
+
+def complete_chat_link(chat_id: int, secret: str) -> Optional[Tuple[int, str]]:
+    """Complete linking by providing secret. Returns (linked_chat_id, linked_platform) or None."""
+    conn = reconnect()
+    # Find pending link with this secret
+    cur = _exec(conn, '''
+        SELECT link_id, chat_id_1, platform_1 FROM ChatLinks
+        WHERE link_secret = %s AND chat_id_2 IS NULL AND linked_at IS NULL
+        LIMIT 1
+    ''', (secret.upper(),))
+    row = cur.fetchone()
+    if not row:
+        conn.close()
+        return None
+
+    link_id, linked_chat_id, linked_platform = row
+
+    # Don't allow linking to same platform
+    if linked_platform == PLATFORM:
+        conn.close()
+        return None
+
+    # Complete the link
+    now = datetime.datetime.now()
+    _exec(conn, '''
+        UPDATE ChatLinks SET chat_id_2 = %s, platform_2 = %s, linked_at = %s
+        WHERE link_id = %s
+    ''', (chat_id, PLATFORM, now, link_id))
+    conn.commit()
+    conn.close()
+    return (linked_chat_id, linked_platform)
+
+
+def get_linked_chat(chat_id: int) -> Optional[Tuple[int, str]]:
+    """Get linked chat for this chat. Returns (linked_chat_id, linked_platform) or None."""
+    conn = reconnect()
+    # Check if this chat is chat_id_1
+    cur = _exec(conn, '''
+        SELECT chat_id_2, platform_2 FROM ChatLinks
+        WHERE chat_id_1 = %s AND platform_1 = %s AND linked_at IS NOT NULL
+        LIMIT 1
+    ''', (chat_id, PLATFORM))
+    row = cur.fetchone()
+    if row and row[0]:
+        conn.close()
+        return (row[0], row[1])
+
+    # Check if this chat is chat_id_2
+    cur = _exec(conn, '''
+        SELECT chat_id_1, platform_1 FROM ChatLinks
+        WHERE chat_id_2 = %s AND platform_2 = %s AND linked_at IS NOT NULL
+        LIMIT 1
+    ''', (chat_id, PLATFORM))
+    row = cur.fetchone()
+    conn.close()
+    if row:
+        return (row[0], row[1])
+    return None
+
+
+def unlink_chat(chat_id: int) -> bool:
+    """Remove link for this chat. Returns True if link was removed."""
+    conn = reconnect()
+    cur = _exec(conn, '''
+        DELETE FROM ChatLinks
+        WHERE (chat_id_1 = %s AND platform_1 = %s) OR (chat_id_2 = %s AND platform_2 = %s)
+    ''', (chat_id, PLATFORM, chat_id, PLATFORM))
+    affected = cur.rowcount
+    conn.commit()
+    conn.close()
+    return affected > 0
+
+
+def get_linked_event_id(event_id: int) -> Optional[int]:
+    """Get linked event for this event. Returns linked_event_id or None."""
+    conn = reconnect()
+    # Check event_id_1
+    cur = _exec(conn, 'SELECT event_id_2 FROM EventLinks WHERE event_id_1 = %s LIMIT 1', (event_id,))
+    row = cur.fetchone()
+    if row:
+        conn.close()
+        return row[0]
+    # Check event_id_2
+    cur = _exec(conn, 'SELECT event_id_1 FROM EventLinks WHERE event_id_2 = %s LIMIT 1', (event_id,))
+    row = cur.fetchone()
+    conn.close()
+    return row[0] if row else None
+
+
+def create_event_link(event_id_1: int, event_id_2: int):
+    """Link two events together."""
+    conn = reconnect()
+    now = datetime.datetime.now()
+    _exec(conn, '''
+        INSERT IGNORE INTO EventLinks (event_id_1, event_id_2, created_at)
+        VALUES (%s, %s, %s)
+    ''', (event_id_1, event_id_2, now))
+    conn.commit()
+    conn.close()
+
+
+def get_event_from_linked_chat(linked_chat_id: int, linked_platform: str) -> Optional[Tuple[int, str, str, int]]:
+    """Get open event from linked chat. Returns (event_id, description, datetime, players_limit) or None."""
+    conn = reconnect()
+    cur = _exec(conn, '''
+        SELECT event_id, description, datetime, players_limit FROM Events
+        WHERE chat_id = %s AND platform = %s AND status = "Open"
+        ORDER BY event_id DESC LIMIT 1
+    ''', (linked_chat_id, linked_platform))
+    row = cur.fetchone()
+    conn.close()
+    return row if row else None
+
+
+def get_linked_event_users(event_id: int) -> List[Tuple[int, str, str]]:
+    """Get users from linked event. Returns [(user_id, platform, display_name), ...]."""
+    linked_event_id = get_linked_event_id(event_id)
+    if not linked_event_id:
+        return []
+
+    conn = reconnect()
+    # Get participants with their platform info
+    cur = _exec(conn, '''
+        SELECT p.user_id, e.platform, u.first_name, u.last_name, u.username
+        FROM Participants p
+        JOIN Events e ON p.event_id = e.event_id
+        LEFT JOIN Users u ON p.user_id = u.user_id AND u.platform = e.platform
+        WHERE p.event_id = %s
+        ORDER BY p.operation_datetime
+    ''', (linked_event_id,))
+    rows = cur.fetchall()
+    conn.close()
+
+    result = []
+    for row in rows:
+        user_id, platform, fnm, lnm, unm = row
+        fnm = fnm or ''
+        lnm = lnm or ''
+        unm = unm or ''
+        name = " ".join([fnm, lnm]).strip()
+        if name and unm:
+            name = f"{name} ({unm})"
+        elif not name and unm:
+            name = unm
+        elif not name:
+            name = str(user_id)
+        result.append((user_id, platform, name))
+    return result
+
 def migrate_schema():
     """Add new columns to existing tables if they don't exist yet."""
     conn = reconnect()
@@ -662,6 +873,8 @@ def init_database():
     create_table_revoked()
     create_table_chat_penalties()
     create_table_payment_log()
+    create_table_chat_links()
+    create_table_event_links()
     migrate_schema()
 
 def record_payment_log(chat_id: int, payer_user_id: int, for_friend: bool = False):

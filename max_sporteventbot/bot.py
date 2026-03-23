@@ -135,6 +135,16 @@ def create_event_full_text(this_chat_id: int, payment_url: str = None) -> str:
     text += '\nСписок игроков:\n'
     text_players = ''
     players = db.get_event_users(this_chat_id) or []
+
+    # Get players from linked event if exists
+    linked_players = []
+    try:
+        event_id = db.get_event_id_by_chat_id(this_chat_id)
+        linked_players = db.get_linked_event_users(event_id)
+    except:
+        pass
+
+    # Show local players
     for n, user_id in enumerate(players, start=1):
         if players_limit and n == players_limit + 1:
             text_players += '\nРезерв:\n'
@@ -145,7 +155,19 @@ def create_event_full_text(this_chat_id: int, payment_url: str = None) -> str:
         payment_mark = ' [оплачено]' if paid else ''
         text_players += f'{in_squad} {n}. {player_name_with_cards(games_registered, penalties, printable_name)}{payment_mark}\n'
 
+    # Show linked players
+    if linked_players:
+        start_n = len(players) + 1
+        for i, (user_id, platform, name) in enumerate(linked_players):
+            n = start_n + i
+            if players_limit and n == players_limit + 1:
+                text_players += '\nРезерв:\n'
+            in_squad = '+' if not players_limit or n <= players_limit else '  '
+            platform_mark = f' [{platform}]'
+            text_players += f'{in_squad} {n}. {name}{platform_mark}\n'
+
     text += text_players
+    total_players = len(players) + len(linked_players)
     canceled_players = db.get_event_revoked_users(this_chat_id) or []
     if canceled_players:
         text += '\nОтказавшиеся:'
@@ -155,7 +177,7 @@ def create_event_full_text(this_chat_id: int, payment_url: str = None) -> str:
             cd_txt = cd.strftime('%Y-%m-%d %H:%M') if cd else str(cancel_datetime)[:16]
             printable_name = db.compose_full_name(canceled_user_id)
             text += f'  {printable_name} - {cd_txt}\n'
-    elif not players:
+    elif total_players == 0:
         text += '\nПока нет заявок'
     safe = text.strip()
     return safe if safe else " "
@@ -239,6 +261,16 @@ async def cmd_help(event: MessageCreated):
 
 /stat
 Статистика участников чата
+
+/link [КОД]
+Связать чат с другим мессенджером. Без КОД - генерирует код.
+С КОД - завершает связывание с чатом который сгенерировал код.
+
+/unlink
+Разорвать связь с другим чатом
+
+/event_copy
+Скопировать событие из связанного чата
 """
     await event.message.answer(help_text)
 
@@ -564,6 +596,104 @@ async def cmd_stat(event: MessageCreated):
         text += f"ID:{userid}, {registered:>2}/{penalties}, Имя: {printable_name}\n"
 
     await event.bot.send_message(chat_id=chat_id, text=text)
+
+
+@dp.message_created(Command('link'))
+async def cmd_link(event: MessageCreated):
+    """Link this chat with another platform chat."""
+    chat_id = event.chat.chat_id
+    new_chat_id_memoization(chat_id)
+
+    # Check if already linked
+    linked = db.get_linked_chat(chat_id)
+    if linked:
+        linked_chat_id, linked_platform = linked
+        await event.message.answer(
+            f'Этот чат уже связан с {linked_platform} (чат {linked_chat_id}).\n'
+            f'Используйте /unlink чтобы разорвать связь.'
+        )
+        return
+
+    # Check for secret argument
+    arg = parse_cmd_arg(event.message.body.text or '')
+    if arg:
+        secret = arg.strip().upper()
+        result = db.complete_chat_link(chat_id, secret)
+        if result:
+            linked_chat_id, linked_platform = result
+            await event.message.answer(
+                f'✅ Чаты успешно связаны!\n'
+                f'Связан с {linked_platform} (чат {linked_chat_id})'
+            )
+        else:
+            await event.message.answer('❌ Неверный или устаревший код связки.')
+        return
+
+    # Generate new secret
+    secret = db.create_chat_link(chat_id)
+    await event.message.answer(
+        f'🔗 Код для связки сгенерирован:\n\n'
+        f'{secret}\n\n'
+        f'Отправьте этот код в чат другого мессенджера командой /link'
+    )
+
+
+@dp.message_created(Command('unlink'))
+async def cmd_unlink(event: MessageCreated):
+    """Remove link with another platform chat."""
+    chat_id = event.chat.chat_id
+    new_chat_id_memoization(chat_id)
+
+    if db.unlink_chat(chat_id):
+        await event.message.answer('✅ Связь с другим чатом разорвана.')
+    else:
+        await event.message.answer('Этот чат не связан с другим чатом.')
+
+
+@dp.message_created(Command('event_copy'))
+async def cmd_event_copy(event: MessageCreated):
+    """Copy event from linked chat."""
+    chat_id = event.chat.chat_id
+    new_chat_id_memoization(chat_id)
+
+    # Check if linked
+    linked = db.get_linked_chat(chat_id)
+    if not linked:
+        await event.message.answer('❌ Этот чат не связан с другим чатом. Используйте /link сначала.')
+        return
+
+    linked_chat_id, linked_platform = linked
+
+    # Check if already have active event
+    if db.get_event_text(chat_id):
+        await event.message.answer('Ошибка: уже есть активное событие. Сначала удалите его командой /event_remove')
+        return
+
+    # Get event from linked chat
+    linked_event = db.get_event_from_linked_chat(linked_chat_id, linked_platform)
+    if not linked_event:
+        await event.message.answer(f'❌ В связанном чате ({linked_platform}) нет активного события.')
+        return
+
+    linked_event_id, description, event_datetime, players_limit = linked_event
+
+    # Create local event
+    db.event_add(chat_id, description, datetime.datetime.now(), players_limit, 0, '')
+
+    # Get local event id and link events
+    local_event_id = db.get_event_id_by_chat_id(chat_id)
+    db.create_event_link(linked_event_id, local_event_id)
+
+    # Show the event
+    message_text = f"📋 Событие скопировано из {linked_platform}:\n\n" + description
+    keyboard = build_event_keyboard()
+    sent_msg = await event.bot.send_message(
+        chat_id=chat_id,
+        text=message_text,
+        attachments=[keyboard] if keyboard else None
+    )
+    msg_id = sent_msg.message.body.mid if sent_msg and sent_msg.message else 0
+    db.save_latest_bot_message(chat_id, msg_id, message_text)
 
 
 @dp.message_callback()

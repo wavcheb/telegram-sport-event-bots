@@ -406,6 +406,16 @@ def create_event_full_text(this_chat_id: int, translate: Callable[[str], str],
     text += translate('Players list') + ':\n'
     text_players = ''
     players = db.get_event_users(this_chat_id) or []
+
+    # Get players from linked event if exists
+    linked_players = []
+    try:
+        event_id = db.get_event_id_by_chat_id(this_chat_id)
+        linked_players = db.get_linked_event_users(event_id)
+    except:
+        pass
+
+    # Show local players
     for n, user_id in enumerate(players, start=1):
         if players_limit and n == players_limit + 1:
             text_players += '\t\t\n' + translate('Reserve') + ':\n'
@@ -416,7 +426,19 @@ def create_event_full_text(this_chat_id: int, translate: Callable[[str], str],
         payment_emoji = '💰' if paid else ''
         text_players += in_squad + f'{n}. {player_name_with_cards(games_registered, penalties, printable_name, translate)} {payment_emoji}\n'
 
+    # Show linked players from other platform
+    if linked_players:
+        start_n = len(players) + 1
+        for i, (user_id, platform, name) in enumerate(linked_players):
+            n = start_n + i
+            if players_limit and n == players_limit + 1:
+                text_players += '\t\t\n' + translate('Reserve') + ':\n'
+            in_squad = '➕' if not players_limit or n <= players_limit else '      '
+            platform_mark = f' [{platform}]'
+            text_players += in_squad + f'{n}. {name}{platform_mark}\n'
+
     text += '\n' + text_players
+    total_players = len(players) + len(linked_players)
     canceled_players = db.get_event_revoked_users(this_chat_id) or []
     if canceled_players:
         text += '\n' + translate('Revoked applications') + ':'
@@ -426,7 +448,7 @@ def create_event_full_text(this_chat_id: int, translate: Callable[[str], str],
             cd_txt = cd.strftime('%Y-%m-%d %H:%M') if cd else str(cancel_datetime)[:16]
             printable_name = db.compose_full_name(canceled_user_id)
             text += f'      <s>{printable_name} - {cd_txt}</s>\n'
-    elif not players:
+    elif total_players == 0:
         text += '\n' + translate('No applications yet')
     safe = text.strip()
     return safe if safe else " "
@@ -656,6 +678,69 @@ async def show_payments(update, context):
             lines.append(f'• <b>{name}</b> {translate("marked payment at")} {time_str}{note}')
         await update.message.reply_text('\n'.join(lines), parse_mode=ParseMode.HTML)
 
+
+@logger.catch
+@make_translatable_user_id_context
+async def link_chat(update, context):
+    """Link this chat with another platform chat (/link command)."""
+    translate = context.user_data['translate']
+    this_chat_id = update.message.chat_id
+    new_chat_id_memoization(this_chat_id, update.message.from_user.language_code)
+
+    # Check if already linked
+    linked = db.get_linked_chat(this_chat_id)
+    if linked:
+        linked_chat_id, linked_platform = linked
+        await update.message.reply_text(
+            f'{translate("This chat is already linked to")} {linked_platform} (chat {linked_chat_id}).\n'
+            f'{translate("Use /unlink to remove the link first.")}',
+            parse_mode=ParseMode.HTML
+        )
+        return
+
+    # Check for secret argument
+    args = context.args
+    if args:
+        secret = args[0].strip().upper()
+        result = db.complete_chat_link(this_chat_id, secret)
+        if result:
+            linked_chat_id, linked_platform = result
+            await update.message.reply_text(
+                f'✅ {translate("Chat linked successfully!")}\n'
+                f'{translate("Linked to")} {linked_platform} (chat {linked_chat_id})',
+                parse_mode=ParseMode.HTML
+            )
+        else:
+            await update.message.reply_text(
+                f'❌ {translate("Invalid or expired link code.")}',
+                parse_mode=ParseMode.HTML
+            )
+        return
+
+    # Generate new secret
+    secret = db.create_chat_link(this_chat_id)
+    await update.message.reply_text(
+        f'🔗 {translate("Link code generated:")}\n\n'
+        f'<code>{secret}</code>\n\n'
+        f'{translate("Send this code in the other messenger chat using /link command.")}',
+        parse_mode=ParseMode.HTML
+    )
+
+
+@logger.catch
+@make_translatable_user_id_context
+async def unlink_chat(update, context):
+    """Remove link with another platform chat (/unlink command)."""
+    translate = context.user_data['translate']
+    this_chat_id = update.message.chat_id
+    new_chat_id_memoization(this_chat_id, update.message.from_user.language_code)
+
+    if db.unlink_chat(this_chat_id):
+        await update.message.reply_text(f'✅ {translate("Chat unlinked successfully.")}')
+    else:
+        await update.message.reply_text(f'{translate("This chat is not linked to any other chat.")}')
+
+
 @logger.catch
 @make_translatable_user_id_context
 async def show_help(update, context):
@@ -711,6 +796,13 @@ You can find USERID by command /stat
 
 /stat
 This group members statistics (registrations and penalties)
+
+/link [CODE]
+Link this chat with another messenger. Without CODE - generates new code.
+With CODE - completes linking with chat that generated the code.
+
+/unlink
+Remove link with another messenger chat.
 """)
     await context.bot.send_message(update.message.chat_id, event_text, parse_mode=ParseMode.HTML)
 
@@ -798,6 +890,8 @@ async def main():
     application.add_handler(CommandHandler('event_datetime', set_event_datetime))
     application.add_handler(CommandHandler('pay', confirm_payment))
     application.add_handler(CommandHandler('payments', show_payments))
+    application.add_handler(CommandHandler('link', link_chat))
+    application.add_handler(CommandHandler('unlink', unlink_chat))
     application.add_handler(CallbackQueryHandler(button))
     application.add_handler(MessageHandler(filters.TEXT | filters.StatusUpdate.NEW_CHAT_MEMBERS, unknown_command_handler))
 
