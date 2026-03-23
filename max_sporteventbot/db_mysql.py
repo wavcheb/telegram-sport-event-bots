@@ -81,9 +81,12 @@ def create_table_users():
         ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
     ''')
     conn.commit()
-    # Insert legioneer users for this platform
-    rows = [(uid, PLATFORM, 'Legioneer') for uid in range(10, 30)]
-    _exec_many(conn, '''INSERT IGNORE INTO Users (user_id, platform, first_name) VALUES (%s, %s, %s);''', rows)
+    # Insert or update legioneer users for this platform (Друг 1, Друг 2, etc.)
+    rows = [(uid, PLATFORM, f'Друг {uid - 9}') for uid in range(10, 30)]
+    _exec_many(conn, '''
+        INSERT INTO Users (user_id, platform, first_name) VALUES (%s, %s, %s)
+        ON DUPLICATE KEY UPDATE first_name = VALUES(first_name);
+    ''', rows)
     conn.commit()
     conn.close()
 
