@@ -39,6 +39,9 @@ from maxapi.types.attachments import InlineKeyboard
 BOT_DIR = os.path.dirname(os.path.abspath(__file__))
 LOCALE_DIR = os.path.join(BOT_DIR, 'locale')
 
+# Payments page URL from environment
+PAYMENTS_PAGE_URL = os.getenv('PAYMENTS_PAGE_URL', '').strip()
+
 # Translations setup
 TRANSLATIONS = {}
 try:
@@ -100,6 +103,7 @@ def build_message_markup(translate_func: Callable[[str], str]) -> List[List[Call
         [CallbackButton(text=translate_func('- Revoke application'), payload='REMOVE')],
         [CallbackButton(text=translate_func('+ Apply friend or legioneer'), payload='ADD_LEGIONEER')],
         [CallbackButton(text=translate_func('- Remove last friend or legioneer'), payload='REMOVE_LEGIONEER')],
+        [CallbackButton(text=translate_func('Payment confirmed'), payload='PAY')],
     ]
     return rows
 
@@ -138,9 +142,20 @@ def create_event_full_text(this_chat_id: int, translate: Callable[[str], str],
             hours = round(delta.seconds / 3600)
             text += translate('Time left') + f': {delta.days} ' + translate('days') + ' ' + translate('and') + f' {hours} ' + translate('hours') + '\n'
 
-    # Payment link
+    # Links section
+    links = []
     if payment_url:
-        text += f'\n{translate("Payment link")}: {payment_url}\n'
+        links.append(f'{translate("Payment link")}: {payment_url}')
+    # Add payments page link if configured
+    if PAYMENTS_PAGE_URL:
+        try:
+            event_id = db.get_event_id_by_chat_id(this_chat_id)
+            payments_link = f'{PAYMENTS_PAGE_URL}?event={event_id}'
+            links.append(f'{translate("Current payments")}: {payments_link}')
+        except:
+            pass
+    if links:
+        text += '\n' + '\n'.join(links) + '\n'
 
     text += '\n' + translate('Players list') + ':\n'
     text_players = ''
@@ -151,7 +166,9 @@ def create_event_full_text(this_chat_id: int, translate: Callable[[str], str],
         in_squad = '+' if not players_limit or n <= players_limit else '  '
         printable_name = db.compose_full_name(user_id)
         games_registered, penalties = db.get_chat_user_rp(this_chat_id, user_id)
-        text_players += f'{in_squad} {n}. {player_name_with_cards(games_registered, penalties, printable_name, translate)}\n'
+        paid = db.get_payment_status(this_chat_id, user_id)
+        payment_mark = ' [paid]' if paid else ''
+        text_players += f'{in_squad} {n}. {player_name_with_cards(games_registered, penalties, printable_name, translate)}{payment_mark}\n'
 
     text += text_players
     canceled_players = db.get_event_revoked_users(this_chat_id) or []
@@ -242,6 +259,12 @@ Register another player (legioneer) to the event
 /rem_leg
 Revoke register for legioneer
 
+/pay
+Confirm payment for the event
+
+/payments
+Show payment log for current event
+
 /fix
 Fix event statistics (increment participants counters)
 
@@ -294,9 +317,25 @@ async def cmd_event_add(event: MessageCreated):
             except:
                 continue
 
-    message_text = translate("New event created") + ":\n\n" + event_text
+    # First create event in database to get event_id
+    db.event_add(chat_id, event_text, datetime.datetime.now(), event_limit, 0, '')
     if payment_url:
-        message_text += f'\n\n{translate("Payment link")}: {payment_url}'
+        db.set_event_payment_url(chat_id, payment_url)
+
+    # Build message text with links
+    message_text = translate("New event created") + ":\n\n" + event_text
+    links = []
+    if payment_url:
+        links.append(f'{translate("Payment link")}: {payment_url}')
+    if PAYMENTS_PAGE_URL:
+        try:
+            event_id = db.get_event_id_by_chat_id(chat_id)
+            payments_link = f'{PAYMENTS_PAGE_URL}?event={event_id}'
+            links.append(f'{translate("Current payments")}: {payments_link}')
+        except:
+            pass
+    if links:
+        message_text += '\n\n' + '\n'.join(links)
 
     keyboard = InlineKeyboard(buttons=build_message_markup(translate))
     sent_msg = await event.bot.send_message(
@@ -306,9 +345,7 @@ async def cmd_event_add(event: MessageCreated):
     )
 
     msg_id = sent_msg.message.body.mid if sent_msg and sent_msg.message else 0
-    db.event_add(chat_id, event_text, datetime.datetime.now(), event_limit, msg_id, message_text)
-    if payment_url:
-        db.set_event_payment_url(chat_id, payment_url)
+    db.save_latest_bot_message(chat_id, msg_id, message_text)
 
 
 @dp.message_created(Command('event_remove'))
@@ -479,6 +516,55 @@ async def cmd_fix(event: MessageCreated):
     db.fix_event(chat_id)
 
 
+@dp.message_created(Command('pay'))
+async def cmd_pay(event: MessageCreated):
+    """Confirm payment for the event."""
+    chat_id = event.chat.chat_id
+    user = event.message.sender
+    lang = db.get_chat_lang(chat_id) if chat_id in db.get_all_chat_ids() else 'ru'
+    new_chat_id_memoization(chat_id, lang)
+    translate = get_translate_func(lang)
+
+    if not db.get_event_text(chat_id):
+        await event.message.answer(translate('No active event found.'))
+        return
+
+    result = db.process_payment(chat_id, user.user_id)
+    await event.message.answer(translate(result['message']))
+    if result['success']:
+        await show_info_impl(event)
+
+
+@dp.message_created(Command('payments'))
+async def cmd_payments(event: MessageCreated):
+    """Show payment log for current event."""
+    chat_id = event.chat.chat_id
+    lang = db.get_chat_lang(chat_id) if chat_id in db.get_all_chat_ids() else 'ru'
+    new_chat_id_memoization(chat_id, lang)
+    translate = get_translate_func(lang)
+
+    event_title = db.get_event_text(chat_id)
+    if not event_title:
+        await event.message.answer(translate('No active event found.'))
+        return
+
+    entries = db.get_payment_log(chat_id)
+    if not entries:
+        await event.message.answer(translate('No payment records yet.'))
+        return
+
+    lines = [translate("Payment log") + ':\n']
+    for name, paid_at, for_friend in entries:
+        if hasattr(paid_at, 'strftime'):
+            time_str = paid_at.strftime('%H:%M')
+        else:
+            time_str = str(paid_at)[:5]
+        note = f' ({translate("probably for friend")})' if for_friend else f' ({translate("probably for self")})'
+        lines.append(f'- {name} {translate("marked payment at")} {time_str}{note}')
+
+    await event.message.answer('\n'.join(lines))
+
+
 @dp.message_created(Command('penalty'))
 async def cmd_penalty(event: MessageCreated):
     """Apply penalty to a user."""
@@ -566,6 +652,10 @@ async def handle_callback(event: MessageCallback):
                 await event.bot.send_message(chat_id=chat_id, text=legion_text)
         except:
             pass
+    elif callback_data == "PAY":
+        result = db.process_payment(chat_id, user.user_id)
+        # Send notification about payment result
+        await event.bot.send_message(chat_id=chat_id, text=translate(result['message']))
 
     # Update message with new player list
     payment_url = db.get_event_payment_url(chat_id)

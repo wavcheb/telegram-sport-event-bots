@@ -1,0 +1,10 @@
+# Protect config file
+<Files "config.php">
+    Order Allow,Deny
+    Deny from all
+</Files>
+
+# Optional: Enable pretty URLs
+# RewriteEngine On
+# RewriteRule ^payments/(\d+)$ payments.php?event=$1 [L,QSA]
+# RewriteRule ^chat/(\d+)$ payments.php?chat=$1 [L,QSA]
