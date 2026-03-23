@@ -759,7 +759,13 @@ async def main():
         print("TELEGRAM_BOT_TOKEN is empty")
         sys.exit(1)
 
-    application = Application.builder().token(api_token).build()
+    # Configure proxy if set (for regions where Telegram is blocked)
+    proxy_url = os.getenv('TELEGRAM_PROXY')
+    builder = Application.builder().token(api_token)
+    if proxy_url:
+        logger.info(f"Using proxy: {proxy_url.split('@')[-1] if '@' in proxy_url else proxy_url}")
+        builder = builder.proxy(proxy_url).get_updates_proxy(proxy_url)
+    application = builder.build()
 
     # Initialize database tables and run migrations
     db.init_database()

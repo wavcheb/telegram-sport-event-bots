@@ -1097,8 +1097,13 @@ async def main():
     # Initialize database
     db.init_database()
 
-    # Create application
-    application = Application.builder().token(api_token).build()
+    # Configure proxy if set (for regions where Telegram is blocked)
+    proxy_url = os.getenv('TELEGRAM_PROXY')
+    builder = Application.builder().token(api_token)
+    if proxy_url:
+        logger.info(f"Using proxy: {proxy_url.split('@')[-1] if '@' in proxy_url else proxy_url}")
+        builder = builder.proxy(proxy_url).get_updates_proxy(proxy_url)
+    application = builder.build()
 
     # Tournament creation conversation handler
     conv_handler = ConversationHandler(
