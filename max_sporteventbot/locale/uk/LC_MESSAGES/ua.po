@@ -1,0 +1,246 @@
+# Translations template for PROJECT.
+# Copyright (C) 2025 ORGANIZATION
+# This file is distributed under the same license as the PROJECT project.
+# FIRST AUTHOR <EMAIL@ADDRESS>, 2025.
+msgid ""
+msgstr ""
+"Project-Id-Version: PROJECT VERSION\n"
+"Report-Msgid-Bugs-To: EMAIL@ADDRESS\n"
+"POT-Creation-Date: 2025-04-07 16:24+0300\n"
+"PO-Revision-Date: YEAR-MO-DA HO:MI+ZONE\n"
+"Last-Translator: FULL NAME <EMAIL@ADDRESS>\n"
+"Language-Team: LANGUAGE <LL@li.org>\n"
+"MIME-Version: 1.0\n"
+"Content-Type: text/plain; charset=utf-8\n"
+"Content-Transfer-Encoding: 8bit\n"
+"Generated-By: Babel 2.17.0\n"
+
+#: sport_event_bot2.py:72
+msgid "+ Apply for participation"
+msgstr "+ Записатися на участь"
+
+#: sport_event_bot2.py:73
+msgid "- Revoke application"
+msgstr "- Відкликати заявку"
+
+#: sport_event_bot2.py:74
+msgid "+ Apply friend or legioneer"
+msgstr "+ Додати друга або легіонера"
+
+#: sport_event_bot2.py:75
+msgid "- Remove last friend or legioneer"
+msgstr "- Видалити останнього друга/легіонера"
+
+#: sport_event_bot2.py:76
+msgid "💰 Payment confirmed"
+msgstr "💰 Оплата підтверджена!"
+
+#: sport_event_bot2.py:102 sport_event_bot2.py:366
+msgid "Payment confirmed!"
+msgstr "Вашу оплату записали!"
+
+#: sport_event_bot2.py:104 sport_event_bot2.py:363
+msgid "You must be registered for the event to confirm payment."
+msgstr "Ви повинні бути зареєстровані на подію, щоб підтвердити оплату."
+
+#: sport_event_bot2.py:120
+msgid "en_US"
+msgstr "uk_UA"
+
+#: sport_event_bot2.py:161
+msgid "Error: Please provide an event description. Usage: /event_add TEXT"
+msgstr "Помилка: додайте опис події. Наприклад: /event_add Футбол завтра о 06:30"
+
+#: sport_event_bot2.py:165
+msgid "Error: An active event already exists. Close it with /event_remove first."
+msgstr "Помилка: активна подія вже існує. Спочатку закрийте її командою /event_remove."
+
+#: sport_event_bot2.py:179
+msgid "New event created"
+msgstr "Нову подію створено"
+
+#: sport_event_bot2.py:235
+msgid "Players limit"
+msgstr "Ліміт гравців"
+
+#: sport_event_bot2.py:239
+msgid "Event date and time"
+msgstr "Дата і час події"
+
+#: sport_event_bot2.py:241
+msgid "Event time out"
+msgstr "Час події минув"
+
+#: sport_event_bot2.py:244
+msgid "Time left"
+msgstr "Залишилося часу"
+
+#: sport_event_bot2.py:244
+msgid "days"
+msgstr "днів"
+
+#: sport_event_bot2.py:244
+msgid "and"
+msgstr "та"
+
+#: sport_event_bot2.py:244
+msgid "hours"
+msgstr "годин"
+
+#: sport_event_bot2.py:246
+msgid "Players list"
+msgstr "Список гравців"
+
+#: sport_event_bot2.py:251
+msgid "Reserve"
+msgstr "У резерві"
+
+#: sport_event_bot2.py:262
+msgid "Revoked applications"
+msgstr "Відкликані заявки"
+
+#: sport_event_bot2.py:268
+msgid "No applications yet"
+msgstr "Поки немає записаних"
+
+#: sport_event_bot2.py:277
+msgid "No events"
+msgstr "Немає подій"
+
+#: sport_event_bot2.py:339
+#, python-format
+msgid "Guest player applied by %(full_name)s"
+msgstr "Гравець %(full_name)s додав гостьового гравця"
+
+#: sport_event_bot2.py:350
+#, python-format
+msgid "Guest player was revoked by %(full_name)s"
+msgstr "Гравець %(full_name)s видалив гостьового гравця"
+
+#: sport_event_bot2.py:360
+msgid "No active event found."
+msgstr "Активних подій не знайдено."
+
+#: sport_event_bot2.py:375
+msgid "Error: Please provide a user ID. Usage: /penalty USERID"
+msgstr "Помилка: вкажіть ID користувача. Наприклад: /penalty USERID"
+
+#: sport_event_bot2.py:380
+#, python-format
+msgid "The player %(full_name)s was handed a yellow card for non-appearance"
+msgstr "Гравець %(full_name)s отримав жовту картку за неявку"
+
+#: sport_event_bot2.py:385
+msgid "Error applying penalty."
+msgstr "Помилка при застосуванні штрафу."
+
+#: sport_event_bot2.py:393
+msgid "No events to fix stat for"
+msgstr "Немає подій для фіксації статистики"
+
+#: sport_event_bot2.py:395 sport_event_bot2.py:422
+msgid "Current statistics for this chat room members:"
+msgstr "Поточна статистика учасників чату:"
+
+#: sport_event_bot2.py:423
+msgid "Registrations / Penalties"
+msgstr "Реєстрації / Пропуски"
+
+#: sport_event_bot2.py:437
+msgid ""
+"\n"
+"Available BOT commands:\n"
+"\n"
+"/event_add TEXT\n"
+"Register new event\n"
+"\n"
+"/event_remove\n"
+"Remove open event\n"
+"\n"
+"/event_update TEXT\n"
+"Change event description\n"
+"\n"
+"/limit XX\n"
+"Set players limit\n"
+"\n"
+"/event_datetime DATE TIME\n"
+"Set event date and time in any format. It will parsed automatically.\n"
+"Example 1: 2023-01-30, 18:00\n"
+"Example2: tomorrow, 14:30\n"
+"\n"
+"/info\n"
+"Show event details\n"
+"\n"
+"/add\n"
+"Register yourself to the event\n"
+"\n"
+"/remove\n"
+"Revoke your application\n"
+"\n"
+"/add_leg\n"
+"Register another player (not participates in this chat) to the event\n"
+"\n"
+"/rem_leg\n"
+"Revoke register for another player\n"
+"\n"
+"/pay\n"
+"Confirm payment for the event\n"
+"\n"
+"/fix\n"
+"Fix event statistics (increment participants counters)\n"
+"\n"
+"/penalty USERID\n"
+"Increase someone's PENALTY counter for unreasonable skipping of the event without notification others.\n"
+"You can find USERID by command /stat\n"
+"\n"
+"/stat\n"
+"This group members statistics (registrations and penalties)\n"
+msgstr ""
+"\n"
+"Доступні команди бота:\n"
+"\n"
+"/event_add ОПИС ДАТА ЧАС\n"
+"Зареєструвати нову подію\n"
+"\n"
+"/event_remove\n"
+"Видалити відкриту подію\n"
+"\n"
+"/event_update ТЕКСТ\n"
+"Змінити опис події\n"
+"\n"
+"/limit XX\n"
+"Встановити ліміт гравців\n"
+"\n"
+"/event_datetime ДАТА ЧАС\n"
+"Встановити дату і час події в будь-якому форматі. Розбирається автоматично.\n"
+"Приклад 1: 2023-01-30, 18:00\n"
+"Приклад 2: завтра, 14:30\n"
+"\n"
+"/info\n"
+"Показати деталі події\n"
+"\n"
+"/add\n"
+"Зареєструвати себе на подію\n"
+"\n"
+"/remove\n"
+"Відкликати свою заявку\n"
+"\n"
+"/add_leg\n"
+"Зареєструвати іншого гравця (не з цього чату) на подію\n"
+"\n"
+"/rem_leg\n"
+"Відкликати реєстрацію іншого гравця\n"
+"\n"
+"/pay\n"
+"Підтвердити оплату події\n"
+"\n"
+"/fix\n"
+"Зафіксувати статистику події (збільшити лічильники учасників)\n"
+"\n"
+"/penalty USERID\n"
+"Збільшити лічильник штрафів за пропуск події без повідомлення.\n"
+"USERID можна дізнатися командою /stat\n"
+"\n"
+"/stat\n"
+"Статистика учасників групи (реєстрації та пропуски)\n"
+

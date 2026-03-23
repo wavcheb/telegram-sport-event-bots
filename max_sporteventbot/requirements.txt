@@ -1,0 +1,9 @@
+# Core dependencies
+python-dotenv>=1.0.0
+loguru>=0.7.0
+
+# MAX Bot API - official library
+maxapi>=0.1.0
+
+# Database
+mysql-connector-python>=8.0.33

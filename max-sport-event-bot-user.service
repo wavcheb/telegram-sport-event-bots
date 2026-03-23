@@ -1,0 +1,13 @@
+[Unit]
+Description=MAX Sport Event Bot (User Service)
+After=network.target
+
+[Service]
+Type=simple
+WorkingDirectory=/usr/local/tgbot/max_sporteventbot
+ExecStart=/usr/local/tgbot/run_max_sport_event_bot.sh
+Restart=always
+RestartSec=10
+
+[Install]
+WantedBy=default.target

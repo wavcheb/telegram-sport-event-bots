@@ -1,0 +1,14 @@
+[Unit]
+Description=MAX Sport Event Bot
+After=network.target mysql.service
+
+[Service]
+Type=simple
+User=root
+WorkingDirectory=/usr/local/tgbot/max_sporteventbot
+ExecStart=/usr/local/tgbot/run_max_sport_event_bot.sh
+Restart=always
+RestartSec=10
+
+[Install]
+WantedBy=multi-user.target
