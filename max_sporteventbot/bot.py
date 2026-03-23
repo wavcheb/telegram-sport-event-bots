@@ -419,7 +419,7 @@ async def cmd_add(event: MessageCreated):
     new_chat_id_memoization(chat_id)
 
     if db.get_event_text(chat_id):
-        db.add_or_update_user(user.user_id, user.first_name or '', '', user.username or '')
+        db.add_or_update_user(user.user_id, user.first_name or '', user.last_name or '', user.username or '')
         db.apply_for_participation_in_the_event(chat_id, user.user_id)
         logger.info(f"Event - Player applied: {user.user_id}")
     await show_info_impl(event)
@@ -433,7 +433,7 @@ async def cmd_remove(event: MessageCreated):
     new_chat_id_memoization(chat_id)
 
     if db.get_event_text(chat_id):
-        db.add_or_update_user(user.user_id, user.first_name or '', '', user.username or '')
+        db.add_or_update_user(user.user_id, user.first_name or '', user.last_name or '', user.username or '')
         db.revoke_application_for_the_event(chat_id, user.user_id)
     await show_info_impl(event)
 
@@ -681,8 +681,8 @@ async def cmd_event_copy(event: MessageCreated):
 
     linked_event_id, description, event_datetime, players_limit = linked_event
 
-    # Create local event
-    db.event_add(chat_id, description, datetime.datetime.now(), players_limit, 0, '')
+    # Create local event with original datetime
+    db.event_add(chat_id, description, event_datetime or datetime.datetime.now(), players_limit, 0, '')
 
     # Get local event id and link events
     local_event_id = db.get_event_id_by_chat_id(chat_id)
@@ -711,7 +711,7 @@ async def handle_callback(event: MessageCallback):
     logger.info(f"Callback: chat_id={chat_id}, user={user.user_id}, action={callback_data}")
 
     try:
-        db.add_or_update_user(user.user_id, user.first_name or '', '', user.username or '')
+        db.add_or_update_user(user.user_id, user.first_name or '', user.last_name or '', user.username or '')
 
         if callback_data == "ADD":
             db.apply_for_participation_in_the_event(chat_id, user.user_id)
