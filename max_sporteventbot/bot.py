@@ -419,7 +419,7 @@ async def cmd_add(event: MessageCreated):
     new_chat_id_memoization(chat_id)
 
     if db.get_event_text(chat_id):
-        db.add_or_update_user(user.user_id, user.name or '', '', user.username or '')
+        db.add_or_update_user(user.user_id, user.first_name or '', '', user.username or '')
         db.apply_for_participation_in_the_event(chat_id, user.user_id)
         logger.info(f"Event - Player applied: {user.user_id}")
     await show_info_impl(event)
@@ -433,7 +433,7 @@ async def cmd_remove(event: MessageCreated):
     new_chat_id_memoization(chat_id)
 
     if db.get_event_text(chat_id):
-        db.add_or_update_user(user.user_id, user.name or '', '', user.username or '')
+        db.add_or_update_user(user.user_id, user.first_name or '', '', user.username or '')
         db.revoke_application_for_the_event(chat_id, user.user_id)
     await show_info_impl(event)
 
@@ -703,38 +703,44 @@ async def cmd_event_copy(event: MessageCreated):
 @dp.message_callback()
 async def handle_callback(event: MessageCallback):
     """Handle inline button callbacks."""
+    # Get chat_id from message recipient
     chat_id = event.message.recipient.chat_id
     user = event.callback.user
     callback_data = event.callback.payload
 
-    db.add_or_update_user(user.user_id, user.name or '', '', user.username or '')
+    logger.info(f"Callback: chat_id={chat_id}, user={user.user_id}, action={callback_data}")
 
-    if callback_data == "ADD":
-        db.apply_for_participation_in_the_event(chat_id, user.user_id)
-    elif callback_data == "REMOVE":
-        db.revoke_application_for_the_event(chat_id, user.user_id)
-    elif callback_data == "ADD_LEGIONEER":
-        db.apply_for_legioneer(chat_id, user.user_id)
-        full_name = db.compose_full_name(user.user_id)
-        await event.bot.send_message(chat_id=chat_id, text=f'Гость добавлен пользователем {full_name}')
-    elif callback_data == "REMOVE_LEGIONEER":
-        db.revoke_for_legioneer(chat_id)
-        try:
+    try:
+        db.add_or_update_user(user.user_id, user.first_name or '', '', user.username or '')
+
+        if callback_data == "ADD":
+            db.apply_for_participation_in_the_event(chat_id, user.user_id)
+        elif callback_data == "REMOVE":
+            db.revoke_application_for_the_event(chat_id, user.user_id)
+        elif callback_data == "ADD_LEGIONEER":
+            db.apply_for_legioneer(chat_id, user.user_id)
             full_name = db.compose_full_name(user.user_id)
-            event_id = db.get_event_id_by_chat_id(chat_id)
-            if event_id and db.get_legioneer_user(event_id) > 9:
-                await event.bot.send_message(chat_id=chat_id, text=f'Гость удалён пользователем {full_name}')
-        except:
-            pass
-    elif callback_data == "PAY":
-        result = db.process_payment(chat_id, user.user_id)
-        msg_map = {
-            'You must be registered for the event to confirm payment.': 'Вы должны быть записаны на событие для подтверждения оплаты.',
-            'Payment confirmed!': 'Оплата подтверждена!',
-            'Payment for friend confirmed!': 'Оплата за друга подтверждена!',
-            'Payment already confirmed.': 'Оплата уже подтверждена.',
-        }
-        await event.bot.send_message(chat_id=chat_id, text=msg_map.get(result['message'], result['message']))
+            await event.bot.send_message(chat_id=chat_id, text=f'Гость добавлен пользователем {full_name}')
+        elif callback_data == "REMOVE_LEGIONEER":
+            db.revoke_for_legioneer(chat_id)
+            try:
+                full_name = db.compose_full_name(user.user_id)
+                event_id = db.get_event_id_by_chat_id(chat_id)
+                if event_id and db.get_legioneer_user(event_id) > 9:
+                    await event.bot.send_message(chat_id=chat_id, text=f'Гость удалён пользователем {full_name}')
+            except:
+                pass
+        elif callback_data == "PAY":
+            result = db.process_payment(chat_id, user.user_id)
+            msg_map = {
+                'You must be registered for the event to confirm payment.': 'Вы должны быть записаны на событие для подтверждения оплаты.',
+                'Payment confirmed!': 'Оплата подтверждена!',
+                'Payment for friend confirmed!': 'Оплата за друга подтверждена!',
+                'Payment already confirmed.': 'Оплата уже подтверждена.',
+            }
+            await event.bot.send_message(chat_id=chat_id, text=msg_map.get(result['message'], result['message']))
+    except Exception as e:
+        logger.exception(f"Error processing callback action: {e}")
 
     # Update message with new player list
     payment_url = db.get_event_payment_url(chat_id)

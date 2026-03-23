@@ -4,6 +4,9 @@
 SCRIPT_DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" &> /dev/null && pwd )"
 BOT_DIR="$SCRIPT_DIR/max_sporteventbot"
 
+# Create logs directory
+mkdir -p "$BOT_DIR/logs"
+
 # Activate virtual environment if exists
 if [ -d "$BOT_DIR/venv" ]; then
     source "$BOT_DIR/venv/bin/activate"
@@ -11,13 +14,9 @@ elif [ -d "$SCRIPT_DIR/venv" ]; then
     source "$SCRIPT_DIR/venv/bin/activate"
 fi
 
-# Load environment variables from .env if exists
-if [ -f "$BOT_DIR/.env" ]; then
-    export $(grep -v '^#' "$BOT_DIR/.env" | xargs)
-elif [ -f "$SCRIPT_DIR/.env" ]; then
-    export $(grep -v '^#' "$SCRIPT_DIR/.env" | xargs)
-fi
+# Note: .env is loaded by python-dotenv in bot.py
+# No need to export here - avoids issues with special characters in passwords
 
-# Change to parent directory (to allow module import) and run
-cd "$SCRIPT_DIR"
-exec python max_sporteventbot/bot.py 2>&1 | tee -a "$BOT_DIR/logs/systemd.log"
+# Change to bot directory and run
+cd "$BOT_DIR"
+exec python bot.py 2>&1 | tee -a "logs/systemd.log"
