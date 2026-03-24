@@ -948,8 +948,8 @@ async def handle_callback(event: MessageCallback):
         if linked_info:
             linked_chat_id, linked_platform, linked_message_id = linked_info
             if linked_platform == 'telegram' and linked_message_id:
-                # Generate Telegram-formatted message for the linked chat
-                tg_text = create_telegram_message_text(linked_chat_id, payment_url)
+                # Generate Telegram-formatted message using original chat_id's event data
+                tg_text = create_telegram_message_text(chat_id, payment_url)
                 # Telegram inline keyboard JSON
                 tg_keyboard = json.dumps({
                     "inline_keyboard": [
