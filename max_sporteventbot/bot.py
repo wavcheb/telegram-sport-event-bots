@@ -681,10 +681,13 @@ async def cmd_event_copy(event: MessageCreated):
         await event.message.answer(f'❌ В связанном чате ({linked_platform}) нет активного события.')
         return
 
-    linked_event_id, description, event_datetime, players_limit = linked_event
+    linked_event_id, description, event_datetime_str, players_limit = linked_event
+
+    # Parse datetime from linked event (stored as string in DB)
+    event_dt = _coerce_to_datetime(event_datetime_str) or datetime.datetime.now()
 
     # Create local event with original datetime
-    db.event_add(chat_id, description, event_datetime or datetime.datetime.now(), players_limit, 0, '')
+    db.event_add(chat_id, description, event_dt, players_limit, 0, '')
 
     # Get local event id and link events
     local_event_id = db.get_event_id_by_chat_id(chat_id)
