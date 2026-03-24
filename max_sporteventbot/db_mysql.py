@@ -100,7 +100,7 @@ def create_table_chats():
             lang VARCHAR(8),
             priority_members TEXT,
             latest_event_id BIGINT DEFAULT 0,
-            latest_bot_message_id BIGINT DEFAULT 0,
+            latest_bot_message_id VARCHAR(64),
             latest_bot_message_text TEXT,
             extra1 TEXT,
             extra2 TEXT,
@@ -898,6 +898,16 @@ def migrate_schema():
             _exec(conn, f'ALTER TABLE {table} ADD COLUMN {col} {definition}')
         except Exception:
             pass  # column already exists
+
+    # Type change migrations (BIGINT -> VARCHAR for string message IDs)
+    type_changes = [
+        ('Chats', 'latest_bot_message_id', 'VARCHAR(64)'),
+    ]
+    for table, col, new_type in type_changes:
+        try:
+            _exec(conn, f'ALTER TABLE {table} MODIFY COLUMN {col} {new_type}')
+        except Exception:
+            pass  # column doesn't exist or already correct type
     conn.close()
 
 def init_database():
