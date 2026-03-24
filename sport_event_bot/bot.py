@@ -363,7 +363,7 @@ async def button(update, context):
     # Cross-platform sync: update linked MAX chat
     try:
         linked_info = db.get_linked_chat_message_info(this_chat_id)
-        logger.debug(f"TG->MAX sync check: this_chat_id={this_chat_id}, linked_info={linked_info}")
+        logger.info(f"TG->MAX sync check: this_chat_id={this_chat_id}, linked_info={linked_info}")
         if linked_info:
             linked_chat_id, linked_platform, linked_message_id = linked_info
             if linked_platform == 'max' and linked_message_id:
