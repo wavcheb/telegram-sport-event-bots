@@ -495,6 +495,19 @@ async def cmd_event_remove(event: MessageCreated):
     chat_id = event.chat.chat_id
     new_chat_id_memoization(chat_id)
 
+    # Remove buttons from last bot message
+    old_msg_id = db.get_latest_bot_message_id(chat_id)
+    old_msg_text = db.get_latest_bot_message_text(chat_id)
+    if old_msg_id and old_msg_text:
+        try:
+            await event.bot.edit_message(
+                message_id=old_msg_id,
+                text=old_msg_text + "\n\n❌ Событие удалено",
+                attachments=None
+            )
+        except Exception as e:
+            logger.debug(f"Could not remove buttons from old message: {e}")
+
     db.close_all_open_events_for_chat(chat_id)
     await event.message.answer('Событие удалено.')
 
@@ -538,6 +551,19 @@ async def show_info_impl(event: MessageCreated):
     if not db.get_event_text(chat_id):
         await event.message.answer('Нет активных событий')
         return
+
+    # Remove buttons from old message before sending new one
+    old_msg_id = db.get_latest_bot_message_id(chat_id)
+    old_msg_text = db.get_latest_bot_message_text(chat_id)
+    if old_msg_id and old_msg_text:
+        try:
+            await event.bot.edit_message(
+                message_id=old_msg_id,
+                text=old_msg_text,
+                attachments=None
+            )
+        except Exception as e:
+            logger.debug(f"Could not remove buttons from old message: {e}")
 
     payment_url = db.get_event_payment_url(chat_id)
     event_text = create_event_full_text(chat_id, payment_url).strip() or " "
