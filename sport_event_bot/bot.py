@@ -20,6 +20,7 @@ import json
 import parsedatetime
 import urllib.request
 import urllib.parse
+import urllib.error
 from html.parser import HTMLParser
 from dotenv import load_dotenv
 
@@ -52,6 +53,9 @@ PAYMENTS_PAGE_URL = os.getenv('PAYMENTS_PAGE_URL', '').strip()
 
 # MAX bot token for cross-platform sync
 MAX_BOT_TOKEN = os.getenv('MAX_BOT_TOKEN', '').strip()
+
+# HTTP proxy for outgoing requests (may be needed for botapi.max.ru)
+HTTP_PROXY = os.getenv('HTTP_PROXY', '').strip() or os.getenv('HTTPS_PROXY', '').strip()
 
 # ==================== URL Metadata Parser ====================
 
@@ -144,15 +148,31 @@ async def sync_to_max(linked_chat_id: int, linked_message_id: int, text: str):
 
         def do_request():
             try:
-                with urllib.request.urlopen(req, timeout=10) as resp:
-                    return resp.read()
+                # Use proxy if configured
+                if HTTP_PROXY:
+                    proxy_handler = urllib.request.ProxyHandler({
+                        'http': HTTP_PROXY,
+                        'https': HTTP_PROXY,
+                    })
+                    opener = urllib.request.build_opener(proxy_handler)
+                    with opener.open(req, timeout=10) as resp:
+                        return resp.read()
+                else:
+                    with urllib.request.urlopen(req, timeout=10) as resp:
+                        return resp.read()
+            except urllib.error.HTTPError as e:
+                logger.warning(f"MAX sync HTTP error: {e.code} {e.reason}")
+                return None
+            except urllib.error.URLError as e:
+                logger.warning(f"MAX sync URL error (network/proxy issue?): {e.reason}")
+                return None
             except Exception as e:
                 logger.warning(f"MAX sync request failed: {e}")
                 return None
 
         result = await asyncio.to_thread(do_request)
         if result:
-            logger.info(f"Synced to MAX chat {linked_chat_id}")
+            logger.info(f"Synced to MAX chat {linked_chat_id}, msg_id={linked_message_id}")
             return True
     except Exception as e:
         logger.warning(f"Failed to sync to MAX: {e}")
