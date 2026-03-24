@@ -29,7 +29,9 @@ find . -name "*.sh" -type f -exec dos2unix {} \; 2>/dev/null
 # Make scripts executable
 echo "🔐 Setting executable permissions..."
 chmod +x setup_all.sh run_*.sh 2>/dev/null
-chmod +x sport_event_bot/setup_venv.sh tournament_bot/setup_venv.sh 2>/dev/null
+chmod +x sport_event_bot/setup_venv.sh sport_event_bot/run.sh 2>/dev/null
+chmod +x tournament_bot/setup_venv.sh 2>/dev/null
+chmod +x max_sporteventbot/setup_venv.sh max_sporteventbot/run.sh 2>/dev/null
 
 echo "✅ Done! Line endings fixed."
 echo ""

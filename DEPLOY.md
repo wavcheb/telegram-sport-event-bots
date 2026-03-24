@@ -65,8 +65,10 @@ chmod +x fix_line_endings.sh
 chmod +x setup_all.sh
 chmod +x sport_event_bot/setup_venv.sh
 chmod +x tournament_bot/setup_venv.sh
+chmod +x max_sporteventbot/setup_venv.sh
 chmod +x run_sport_event_bot.sh
 chmod +x run_tournament_bot.sh
+chmod +x run_max_sport_event_bot.sh
 
 # Run setup for all bots
 ./setup_all.sh
@@ -75,6 +77,7 @@ chmod +x run_tournament_bot.sh
 This will:
 - Create `sport_event_bot/venv/` with all dependencies
 - Create `tournament_bot/venv/` with all dependencies
+- Create `max_sporteventbot/venv/` with all dependencies
 - Install all required packages from `requirements.txt`
 
 **Common Issue - Line Endings:**
@@ -184,7 +187,7 @@ MYSQL_PASSWORD=your_secure_password
 chmod 600 .env
 ```
 
-**Note:** For backward compatibility, bots also check `token.txt` files if env var is not set.
+**Note:** The `.env` file is the recommended way to configure credentials.
 
 ## 🧪 Test Run
 
@@ -525,7 +528,7 @@ sudo apt install dos2unix
 find . -name "*.sh" -type f -exec dos2unix {} \;
 
 # Make scripts executable again
-chmod +x setup_all.sh run_*.sh */setup_venv.sh
+chmod +x setup_all.sh run_*.sh */setup_venv.sh */run.sh
 ```
 
 ### Virtual Environment Issues

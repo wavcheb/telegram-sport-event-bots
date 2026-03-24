@@ -50,7 +50,8 @@ Sport Event Bot (Telegram) and MAX Sport Event Bot can share a database and link
 - **Shared Database**: Both bots use the same MySQL database with `platform` field separation
 - **Chat Linking**: Link Telegram and MAX chats with `/link` command
 - **Participant Sync**: See participants from both platforms in event messages
-- **Event Copy**: Sync participants between platforms with `/event_copy`
+- **Event Copy**: Copy events between platforms with `/event_copy`
+- **Real-Time Sync**: When participants register in one platform, the message in linked chat updates automatically (requires cross-tokens in .env)
 
 ## 🚀 Quick Start
 
@@ -247,9 +248,10 @@ Each bot is a self-contained Python package:
 To add a new bot to the collection:
 1. Create a new directory (e.g., `new_bot/`)
 2. Add `__init__.py` and `bot.py`
-3. Create `token.txt` and `logs/` directory
-4. Add startup script `run_new_bot.sh`
-5. Update this README
+3. Create `setup_venv.sh`, `run.sh` and `logs/` directory
+4. Add startup script `run_new_bot.sh` in root
+5. Add bot token variable to `.env.example`
+6. Update this README
 
 ## 🤝 Integration
 

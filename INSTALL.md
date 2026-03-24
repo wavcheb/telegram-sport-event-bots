@@ -113,8 +113,8 @@ If successful, you'll see MySQL prompt. Type `EXIT;` to leave.
 
 ```bash
 cd /opt  # or your preferred location
-git clone https://github.com/wavcheb/champ.git
-cd champ
+git clone https://github.com/wavcheb/telegram-sport-event-bots.git
+cd telegram-sport-event-bots
 ```
 
 ### Create Virtual Environment
@@ -157,7 +157,7 @@ Save and secure:
 chmod 600 .env
 ```
 
-**Note:** For backward compatibility, the bot also checks `sport_event_bot/token.txt` if env var is not set.
+**Note:** The `.env` file is the recommended way to configure credentials.
 
 ## Step 5: Test Run
 
@@ -272,17 +272,17 @@ sudo systemctl disable sport-event-bot
 
 ## 🔒 Security Best Practices
 
-### 1. Protect Your Token
+### 1. Protect Your Credentials
 
 ```bash
-# Set restrictive permissions
-chmod 600 token.txt
+# Set restrictive permissions on .env
+chmod 600 .env
 ```
 
 ### 2. Regular Updates
 
 ```bash
-cd /opt/champ
+cd /opt/telegram-sport-event-bots
 git pull
 pip install -r requirements.txt --upgrade
 sudo systemctl restart sport-event-bot
@@ -385,10 +385,10 @@ SHOW PROCESSLIST;
 
 **Fix file permissions:**
 ```bash
-cd /opt/champ
+cd /opt/telegram-sport-event-bots
 sudo chown -R $USER:$USER .
-chmod +x run_sport_event_bot.sh run_tournament_bot.sh
-chmod 600 sport_event_bot/token.txt tournament_bot/token.txt
+chmod +x run_sport_event_bot.sh run_tournament_bot.sh run_max_sport_event_bot.sh
+chmod 600 .env
 ```
 
 ## 📈 Monitoring
@@ -429,13 +429,13 @@ top -p $(pgrep -f sport_event_bot)
 1. **Use tmux or screen** for manual testing:
    ```bash
    tmux new -s bot
-   python sport_event_bot2.py
+   ./run_sport_event_bot.sh
    # Detach: Ctrl+B then D
    # Reattach: tmux attach -t bot
    ```
 
 2. **Enable debug logging** for troubleshooting:
-   Edit `sport_event_bot2.py` line 590:
+   Edit `sport_event_bot/bot.py` logger level:
    ```python
    logger.add("logs/logs.log", level="DEBUG")  # Change from INFO
    ```
