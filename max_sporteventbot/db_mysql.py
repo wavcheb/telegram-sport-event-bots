@@ -810,11 +810,11 @@ def create_event_link(event_id_1: int, event_id_2: int):
     conn.close()
 
 
-def get_event_from_linked_chat(linked_chat_id: int, linked_platform: str) -> Optional[Tuple[int, str, str, int]]:
-    """Get open event from linked chat. Returns (event_id, description, datetime, players_limit) or None."""
+def get_event_from_linked_chat(linked_chat_id: int, linked_platform: str) -> Optional[Tuple[int, str, str, int, str]]:
+    """Get open event from linked chat. Returns (event_id, description, datetime, players_limit, payment_url) or None."""
     conn = reconnect()
     cur = _exec(conn, '''
-        SELECT event_id, description, datetime, players_limit FROM Events
+        SELECT event_id, description, datetime, players_limit, COALESCE(payment_url, '') FROM Events
         WHERE chat_id = %s AND platform = %s AND status = "Open"
         ORDER BY event_id DESC LIMIT 1
     ''', (linked_chat_id, linked_platform))

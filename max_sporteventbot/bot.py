@@ -16,6 +16,8 @@ import asyncio
 from typing import Optional, List
 from loguru import logger
 from dotenv import load_dotenv
+import parsedatetime
+from recurrent.event_parser import RecurringEvent
 
 # Load environment variables from .env file
 load_dotenv()
@@ -59,6 +61,21 @@ def _coerce_to_datetime(val: object) -> Optional[datetime.datetime]:
                 except ValueError:
                     pass
     return None
+
+
+def parse_datetime(str_datetime_in_free_form: str) -> Optional[datetime.datetime]:
+    """Parse datetime from free-form text in Russian."""
+    consts = parsedatetime.Constants(localeID='ru_RU', usePyICU=False)
+    consts.use24 = True
+    r_event = RecurringEvent(parse_constants=consts)
+    found_date = r_event.parse(str_datetime_in_free_form)
+    if not found_date:
+        return None
+    delta = found_date - datetime.datetime.now()
+    if delta.days < 0 or delta.days > 31:
+        logger.info(f"Invalid time delta: {delta.days} days")
+        return None
+    return found_date
 
 
 def new_chat_id_memoization(chat_id: int, all_known_chat_ids=None):
@@ -106,33 +123,33 @@ def create_event_full_text(this_chat_id: int, payment_url: str = None) -> str:
         return printable_name
 
     event_title = db.get_event_text(this_chat_id) or ""
-    text = '"' + event_title + '"\n'
+    text = '🎉 "' + event_title + '" 🎉\n'
     players_limit = db.get_event_limit(this_chat_id) or 0
     if players_limit:
-        text += f'Лимит игроков: {players_limit}\n'
+        text += f'👥 Лимит игроков: {players_limit}\n'
     raw_dt = db.get_event_datetime(this_chat_id)
     event_datetime = _coerce_to_datetime(raw_dt)
     if event_datetime:
-        text += f"Дата и время: {event_datetime.strftime('%Y-%m-%d, %H:%M')}\n"
+        text += f"📅 Дата и время: {event_datetime.strftime('%Y-%m-%d, %H:%M')}\n"
         now = datetime.datetime.now()
         if event_datetime < now:
-            text += 'Время события истекло.\n'
+            text += '⏰ Время события истекло.\n'
         else:
             delta = event_datetime - now
             hours = round(delta.seconds / 3600)
-            text += f'Осталось: {delta.days} дн. и {hours} ч.\n'
+            text += f'⏳ Осталось: {delta.days} дн. и {hours} ч.\n'
 
     # Links section
     links = []
     if payment_url:
-        links.append(f'Ссылка для оплаты: {payment_url}')
+        links.append(f'💳 Ссылка для оплаты: {payment_url}')
     if PAYMENTS_PAGE_URL:
         try:
             event_id = db.get_event_id_by_chat_id(this_chat_id)
             # Use primary (original) event_id for linked events
             primary_event_id = db.get_primary_event_id(event_id)
             payments_link = f'{PAYMENTS_PAGE_URL}?event={primary_event_id}'
-            links.append(f'Текущие платежи: {payments_link}')
+            links.append(f'📊 Текущие платежи: {payments_link}')
         except:
             pass
     if links:
@@ -318,8 +335,11 @@ async def cmd_event_add(event: MessageCreated):
             except:
                 continue
 
+    # Parse datetime from event text
+    event_datetime = parse_datetime(event_text)
+
     # Create event in database
-    db.event_add(chat_id, event_text, datetime.datetime.now(), event_limit, 0, '')
+    db.event_add(chat_id, event_text, event_datetime, event_limit, 0, '')
     if payment_url:
         db.set_event_payment_url(chat_id, payment_url)
 
@@ -681,13 +701,17 @@ async def cmd_event_copy(event: MessageCreated):
         await event.message.answer(f'❌ В связанном чате ({linked_platform}) нет активного события.')
         return
 
-    linked_event_id, description, event_datetime_str, players_limit = linked_event
+    linked_event_id, description, event_datetime_str, players_limit, payment_url = linked_event
 
     # Parse datetime from linked event (stored as string in DB)
     event_dt = _coerce_to_datetime(event_datetime_str) or datetime.datetime.now()
 
     # Create local event with original datetime
     db.event_add(chat_id, description, event_dt, players_limit, 0, '')
+
+    # Copy payment URL if exists
+    if payment_url:
+        db.set_event_payment_url(chat_id, payment_url)
 
     # Get local event id and link events
     local_event_id = db.get_event_id_by_chat_id(chat_id)
