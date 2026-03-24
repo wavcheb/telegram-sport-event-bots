@@ -767,9 +767,10 @@ def unlink_chat(chat_id: int) -> bool:
     return affected > 0
 
 
-def get_linked_chat_message_info(chat_id: int) -> Optional[Tuple[int, str, int]]:
+def get_linked_chat_message_info(chat_id: int) -> Optional[Tuple[int, str, str]]:
     """Get linked chat's message info for cross-platform sync.
-    Returns (linked_chat_id, linked_platform, linked_message_id) or None."""
+    Returns (linked_chat_id, linked_platform, linked_message_id) or None.
+    Note: message_id is string (MAX uses 'mid.xxx', TG uses numeric strings)."""
     linked = get_linked_chat(chat_id)
     if not linked:
         return None
@@ -782,7 +783,7 @@ def get_linked_chat_message_info(chat_id: int) -> Optional[Tuple[int, str, int]]
     row = cur.fetchone()
     conn.close()
     if row and row[0]:
-        return (linked_chat_id, linked_platform, int(row[0]))
+        return (linked_chat_id, linked_platform, str(row[0]))
     return None
 
 
