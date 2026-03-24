@@ -758,6 +758,25 @@ def get_linked_chat(chat_id: int) -> Optional[Tuple[int, str]]:
     return None
 
 
+def get_linked_chat_message_info(chat_id: int) -> Optional[Tuple[int, str, int]]:
+    """Get linked chat's message info for cross-platform sync.
+    Returns (linked_chat_id, linked_platform, linked_message_id) or None."""
+    linked = get_linked_chat(chat_id)
+    if not linked:
+        return None
+    linked_chat_id, linked_platform = linked
+    conn = reconnect()
+    cur = _exec(conn, '''
+        SELECT latest_bot_message_id FROM Chats
+        WHERE chat_id = %s AND platform = %s LIMIT 1
+    ''', (linked_chat_id, linked_platform))
+    row = cur.fetchone()
+    conn.close()
+    if row and row[0]:
+        return (linked_chat_id, linked_platform, int(row[0]))
+    return None
+
+
 def unlink_chat(chat_id: int) -> bool:
     """Remove link for this chat. Returns True if link was removed."""
     conn = reconnect()
@@ -810,11 +829,11 @@ def create_event_link(event_id_1: int, event_id_2: int):
     conn.close()
 
 
-def get_event_from_linked_chat(linked_chat_id: int, linked_platform: str) -> Optional[Tuple[int, str, str, int]]:
-    """Get open event from linked chat. Returns (event_id, description, datetime, players_limit) or None."""
+def get_event_from_linked_chat(linked_chat_id: int, linked_platform: str) -> Optional[Tuple[int, str, str, int, str]]:
+    """Get open event from linked chat. Returns (event_id, description, datetime, players_limit, payment_url) or None."""
     conn = reconnect()
     cur = _exec(conn, '''
-        SELECT event_id, description, datetime, players_limit FROM Events
+        SELECT event_id, description, datetime, players_limit, COALESCE(payment_url, '') FROM Events
         WHERE chat_id = %s AND platform = %s AND status = "Open"
         ORDER BY event_id DESC LIMIT 1
     ''', (linked_chat_id, linked_platform))

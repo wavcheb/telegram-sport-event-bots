@@ -767,6 +767,36 @@ def unlink_chat(chat_id: int) -> bool:
     return affected > 0
 
 
+def get_linked_chat_message_info(chat_id: int) -> Optional[Tuple[int, str, int]]:
+    """Get linked chat's message info for cross-platform sync.
+    Returns (linked_chat_id, linked_platform, linked_message_id) or None."""
+    linked = get_linked_chat(chat_id)
+    if not linked:
+        return None
+    linked_chat_id, linked_platform = linked
+    conn = reconnect()
+    cur = _exec(conn, '''
+        SELECT latest_bot_message_id FROM Chats
+        WHERE chat_id = %s AND platform = %s LIMIT 1
+    ''', (linked_chat_id, linked_platform))
+    row = cur.fetchone()
+    conn.close()
+    if row and row[0]:
+        return (linked_chat_id, linked_platform, int(row[0]))
+    return None
+
+
+def get_primary_event_id(event_id: int) -> int:
+    """Get the primary (original) event ID. If this is a copied event, returns the original.
+    Otherwise returns the same event_id."""
+    conn = reconnect()
+    # If this event is event_id_2 (copy), return event_id_1 (original)
+    cur = _exec(conn, 'SELECT event_id_1 FROM EventLinks WHERE event_id_2 = %s LIMIT 1', (event_id,))
+    row = cur.fetchone()
+    conn.close()
+    return row[0] if row else event_id
+
+
 def get_linked_event_id(event_id: int) -> Optional[int]:
     """Get linked event for this event. Returns linked_event_id or None."""
     conn = reconnect()
