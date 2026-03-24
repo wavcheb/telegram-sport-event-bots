@@ -57,36 +57,60 @@ if (!$event) {
     die('Event not found');
 }
 
-// Get payment log
-$stmt = $pdo->prepare('
+// Find all linked event IDs (including this one)
+$all_event_ids = [$event_id];
+$stmt = $pdo->prepare('SELECT event_id_2 FROM EventLinks WHERE event_id_1 = ?');
+$stmt->execute([$event_id]);
+while ($row = $stmt->fetch(PDO::FETCH_ASSOC)) {
+    $all_event_ids[] = (int)$row['event_id_2'];
+}
+$stmt = $pdo->prepare('SELECT event_id_1 FROM EventLinks WHERE event_id_2 = ?');
+$stmt->execute([$event_id]);
+while ($row = $stmt->fetch(PDO::FETCH_ASSOC)) {
+    $all_event_ids[] = (int)$row['event_id_1'];
+}
+$all_event_ids = array_unique($all_event_ids);
+$placeholders = implode(',', array_fill(0, count($all_event_ids), '?'));
+
+// Get payment log from all linked events
+$stmt = $pdo->prepare("
     SELECT u.first_name, u.last_name, u.username, pl.paid_at, pl.for_friend
     FROM PaymentLog pl
     LEFT JOIN Users u ON pl.payer_user_id = u.user_id
-    WHERE pl.event_id = ?
+    WHERE pl.event_id IN ($placeholders)
     ORDER BY pl.paid_at ASC
-');
-$stmt->execute([$event_id]);
+");
+$stmt->execute($all_event_ids);
 $payments = $stmt->fetchAll(PDO::FETCH_ASSOC);
 
-// Get participants with payment status
-$stmt = $pdo->prepare('
-    SELECT u.user_id, u.first_name, u.last_name, u.username, p.paid, p.paid_at
+// Get participants with payment status from all linked events
+$stmt = $pdo->prepare("
+    SELECT p.event_id, u.user_id, u.first_name, u.last_name, u.username, p.paid, p.paid_at, e.platform
     FROM Participants p
-    LEFT JOIN Users u ON p.user_id = u.user_id
-    WHERE p.event_id = ?
+    LEFT JOIN Events e ON p.event_id = e.event_id
+    LEFT JOIN Users u ON p.user_id = u.user_id AND u.platform = e.platform
+    WHERE p.event_id IN ($placeholders)
     ORDER BY p.operation_datetime ASC
-');
-$stmt->execute([$event_id]);
+");
+$stmt->execute($all_event_ids);
 $participants = $stmt->fetchAll(PDO::FETCH_ASSOC);
 
 // Helper function to format name
-function formatName($row) {
+function formatName($row, $showPlatform = false) {
     $name = trim(($row['first_name'] ?? '') . ' ' . ($row['last_name'] ?? ''));
     $username = $row['username'] ?? '';
     if ($name && $username) {
-        return "$name ($username)";
+        $result = "$name ($username)";
+    } else {
+        $result = $name ?: $username ?: 'Unknown';
     }
-    return $name ?: $username ?: 'Unknown';
+    if ($showPlatform && !empty($row['platform'])) {
+        $platform = $row['platform'];
+        if ($platform !== 'telegram') {
+            $result .= " [$platform]";
+        }
+    }
+    return $result;
 }
 
 // Count statistics
@@ -225,7 +249,7 @@ $unpaid_count = $total_participants - $paid_count;
                 <?php foreach ($participants as $i => $p): ?>
                     <div class="list-item <?= $p['paid'] ? 'paid' : 'unpaid' ?>">
                         <div>
-                            <span class="name"><?= ($i + 1) ?>. <?= htmlspecialchars(formatName($p)) ?></span>
+                            <span class="name"><?= ($i + 1) ?>. <?= htmlspecialchars(formatName($p, true)) ?></span>
                             <?php if ($p['paid'] && $p['paid_at']): ?>
                                 <span class="time"><?= date('H:i', strtotime($p['paid_at'])) ?></span>
                             <?php endif; ?>
