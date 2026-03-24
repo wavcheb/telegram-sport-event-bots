@@ -362,8 +362,13 @@ async def button(update, context):
 
     # Cross-platform sync: update linked MAX chat
     try:
+        # Debug: check link first
+        linked_chat = db.get_linked_chat(this_chat_id)
+        logger.info(f"TG->MAX sync: this_chat_id={this_chat_id}, linked_chat={linked_chat}")
+
         linked_info = db.get_linked_chat_message_info(this_chat_id)
-        logger.info(f"TG->MAX sync check: this_chat_id={this_chat_id}, linked_info={linked_info}")
+        logger.info(f"TG->MAX sync: linked_info={linked_info}")
+
         if linked_info:
             linked_chat_id, linked_platform, linked_message_id = linked_info
             if linked_platform == 'max' and linked_message_id:
@@ -371,6 +376,8 @@ async def button(update, context):
                 max_text = create_max_message_text(this_chat_id, payment_url)
                 logger.info(f"Syncing TG->MAX: tg_chat={this_chat_id} -> max_chat={linked_chat_id}, msg_id={linked_message_id}")
                 await sync_to_max(linked_chat_id, linked_message_id, max_text)
+        elif linked_chat:
+            logger.warning(f"TG->MAX sync: chat linked but no message_id. Did you run /info in MAX chat?")
     except Exception as e:
         logger.warning(f"Cross-platform sync failed: {e}")
 
