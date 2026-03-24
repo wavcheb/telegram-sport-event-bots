@@ -20,6 +20,7 @@ import json
 import parsedatetime
 import urllib.request
 import urllib.parse
+import urllib.error
 from html.parser import HTMLParser
 from dotenv import load_dotenv
 
@@ -146,13 +147,19 @@ async def sync_to_max(linked_chat_id: int, linked_message_id: int, text: str):
             try:
                 with urllib.request.urlopen(req, timeout=10) as resp:
                     return resp.read()
+            except urllib.error.HTTPError as e:
+                logger.warning(f"MAX sync HTTP error: {e.code} {e.reason}")
+                return None
+            except urllib.error.URLError as e:
+                logger.warning(f"MAX sync URL error: {e.reason}")
+                return None
             except Exception as e:
                 logger.warning(f"MAX sync request failed: {e}")
                 return None
 
         result = await asyncio.to_thread(do_request)
         if result:
-            logger.info(f"Synced to MAX chat {linked_chat_id}")
+            logger.info(f"Synced to MAX successfully")
             return True
     except Exception as e:
         logger.warning(f"Failed to sync to MAX: {e}")
@@ -356,10 +363,13 @@ async def button(update, context):
     # Cross-platform sync: update linked MAX chat
     try:
         linked_info = db.get_linked_chat_message_info(this_chat_id)
+        logger.debug(f"TG->MAX sync check: this_chat_id={this_chat_id}, linked_info={linked_info}")
         if linked_info:
             linked_chat_id, linked_platform, linked_message_id = linked_info
             if linked_platform == 'max' and linked_message_id:
-                max_text = create_max_message_text(linked_chat_id, payment_url)
+                # Use this_chat_id (TG) to get event data, not linked_chat_id (MAX)
+                max_text = create_max_message_text(this_chat_id, payment_url)
+                logger.info(f"Syncing TG->MAX: tg_chat={this_chat_id} -> max_chat={linked_chat_id}, msg_id={linked_message_id}")
                 await sync_to_max(linked_chat_id, linked_message_id, max_text)
     except Exception as e:
         logger.warning(f"Cross-platform sync failed: {e}")
