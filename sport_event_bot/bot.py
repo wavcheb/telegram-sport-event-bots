@@ -129,19 +129,21 @@ def _coerce_to_datetime(val: object) -> Optional[datetime.datetime]:
     return None
 
 
-async def sync_to_max(linked_chat_id: int, linked_message_id: int, text: str):
+async def sync_to_max(linked_chat_id: int, linked_message_id: str, text: str):
     """Update message in linked MAX chat."""
     if not MAX_BOT_TOKEN:
         logger.debug("MAX_BOT_TOKEN not set, skipping MAX sync")
         return False
 
     try:
-        url = f"https://botapi.max.ru/messages/{linked_message_id}?access_token={MAX_BOT_TOKEN}"
+        # MAX API migrated to platform-api.max.ru with Authorization header
+        url = f"https://platform-api.max.ru/messages?message_id={linked_message_id}"
         data = json.dumps({
             'text': text,
         }).encode('utf-8')
         req = urllib.request.Request(url, data=data, method='PUT')
         req.add_header('Content-Type', 'application/json')
+        req.add_header('Authorization', MAX_BOT_TOKEN)
 
         def do_request():
             try:
