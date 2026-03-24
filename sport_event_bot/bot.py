@@ -54,9 +54,6 @@ PAYMENTS_PAGE_URL = os.getenv('PAYMENTS_PAGE_URL', '').strip()
 # MAX bot token for cross-platform sync
 MAX_BOT_TOKEN = os.getenv('MAX_BOT_TOKEN', '').strip()
 
-# HTTP proxy for outgoing requests (may be needed for botapi.max.ru)
-HTTP_PROXY = os.getenv('HTTP_PROXY', '').strip() or os.getenv('HTTPS_PROXY', '').strip()
-
 # ==================== URL Metadata Parser ====================
 
 class _MetaExtractor(HTMLParser):
@@ -148,23 +145,13 @@ async def sync_to_max(linked_chat_id: int, linked_message_id: int, text: str):
 
         def do_request():
             try:
-                # Use proxy if configured
-                if HTTP_PROXY:
-                    proxy_handler = urllib.request.ProxyHandler({
-                        'http': HTTP_PROXY,
-                        'https': HTTP_PROXY,
-                    })
-                    opener = urllib.request.build_opener(proxy_handler)
-                    with opener.open(req, timeout=10) as resp:
-                        return resp.read()
-                else:
-                    with urllib.request.urlopen(req, timeout=10) as resp:
-                        return resp.read()
+                with urllib.request.urlopen(req, timeout=10) as resp:
+                    return resp.read()
             except urllib.error.HTTPError as e:
                 logger.warning(f"MAX sync HTTP error: {e.code} {e.reason}")
                 return None
             except urllib.error.URLError as e:
-                logger.warning(f"MAX sync URL error (network/proxy issue?): {e.reason}")
+                logger.warning(f"MAX sync URL error: {e.reason}")
                 return None
             except Exception as e:
                 logger.warning(f"MAX sync request failed: {e}")
@@ -172,7 +159,7 @@ async def sync_to_max(linked_chat_id: int, linked_message_id: int, text: str):
 
         result = await asyncio.to_thread(do_request)
         if result:
-            logger.info(f"Synced to MAX chat {linked_chat_id}, msg_id={linked_message_id}")
+            logger.info(f"Synced to MAX successfully")
             return True
     except Exception as e:
         logger.warning(f"Failed to sync to MAX: {e}")
@@ -376,10 +363,13 @@ async def button(update, context):
     # Cross-platform sync: update linked MAX chat
     try:
         linked_info = db.get_linked_chat_message_info(this_chat_id)
+        logger.debug(f"TG->MAX sync check: this_chat_id={this_chat_id}, linked_info={linked_info}")
         if linked_info:
             linked_chat_id, linked_platform, linked_message_id = linked_info
             if linked_platform == 'max' and linked_message_id:
-                max_text = create_max_message_text(linked_chat_id, payment_url)
+                # Use this_chat_id (TG) to get event data, not linked_chat_id (MAX)
+                max_text = create_max_message_text(this_chat_id, payment_url)
+                logger.info(f"Syncing TG->MAX: tg_chat={this_chat_id} -> max_chat={linked_chat_id}, msg_id={linked_message_id}")
                 await sync_to_max(linked_chat_id, linked_message_id, max_text)
     except Exception as e:
         logger.warning(f"Cross-platform sync failed: {e}")
