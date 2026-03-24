@@ -81,8 +81,9 @@ def create_table_users():
         ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
     ''')
     conn.commit()
-    # Insert or update legioneer users for this platform (Друг 1, Друг 2, etc.)
-    rows = [(uid, PLATFORM, f'Друг {uid - 9}') for uid in range(10, 30)]
+    # Insert or update legioneer users for MAX platform (Друг 1, Друг 2, etc.)
+    # MAX uses user_id 31-59, Telegram uses 10-29
+    rows = [(uid, PLATFORM, f'Друг {uid - 30}') for uid in range(31, 60)]
     _exec_many(conn, '''
         INSERT INTO Users (user_id, platform, first_name) VALUES (%s, %s, %s)
         ON DUPLICATE KEY UPDATE first_name = VALUES(first_name);
@@ -509,12 +510,13 @@ def get_event_id_by_chat_id(chat_id):
     raise ValueError(f"No event found for chat_id: {chat_id}")
 
 def get_legioneer_user(event_id: int):
+    """Get next available legioneer user_id for MAX (range 31-59)."""
     conn = reconnect()
-    cur = _exec(conn, 'SELECT COUNT(user_id) FROM Participants WHERE event_id = %s AND user_id < 29;', (event_id,))
+    cur = _exec(conn, 'SELECT COUNT(user_id) FROM Participants WHERE event_id = %s AND user_id BETWEEN 31 AND 59;', (event_id,))
     count = cur.fetchone()
     conn.close()
     if count is not None:
-        return int(count[0]) + 10
+        return int(count[0]) + 31
     raise ValueError(f"Strange error - not found legioners in event {event_id}")
 
 def apply_for_legioneer(chat_id, invited_by_user_id=None):
@@ -535,11 +537,12 @@ def apply_for_legioneer(chat_id, invited_by_user_id=None):
     conn.close()
 
 def revoke_for_legioneer(chat_id):
+    """Remove last legioneer from event. MAX uses user_id 31-59."""
     logger.info(f"Event - Legioneer-player canceled request for chat: {chat_id}")
     conn = reconnect()
     event_id = get_event_id_by_chat_id(chat_id)
     user_id = get_legioneer_user(event_id) - 1
-    if user_id > 9:
+    if user_id > 30:
         dtm = datetime.datetime.now()
         _exec(conn, 'DELETE FROM Participants WHERE event_id = %s AND user_id = %s;', (event_id, user_id))
         _exec(conn, '''
@@ -782,6 +785,17 @@ def get_linked_event_id(event_id: int) -> Optional[int]:
     row = cur.fetchone()
     conn.close()
     return row[0] if row else None
+
+
+def get_primary_event_id(event_id: int) -> int:
+    """Get the primary (original) event ID. If this is a copied event, returns the original.
+    Otherwise returns the same event_id."""
+    conn = reconnect()
+    # If this event is event_id_2 (copy), return event_id_1 (original)
+    cur = _exec(conn, 'SELECT event_id_1 FROM EventLinks WHERE event_id_2 = %s LIMIT 1', (event_id,))
+    row = cur.fetchone()
+    conn.close()
+    return row[0] if row else event_id
 
 
 def create_event_link(event_id_1: int, event_id_2: int):

@@ -129,7 +129,9 @@ def create_event_full_text(this_chat_id: int, payment_url: str = None) -> str:
     if PAYMENTS_PAGE_URL:
         try:
             event_id = db.get_event_id_by_chat_id(this_chat_id)
-            payments_link = f'{PAYMENTS_PAGE_URL}?event={event_id}'
+            # Use primary (original) event_id for linked events
+            primary_event_id = db.get_primary_event_id(event_id)
+            payments_link = f'{PAYMENTS_PAGE_URL}?event={primary_event_id}'
             links.append(f'Текущие платежи: {payments_link}')
         except:
             pass
@@ -463,7 +465,7 @@ async def cmd_remove_legioneer(event: MessageCreated):
     if db.get_event_text(chat_id):
         try:
             event_id = db.get_event_id_by_chat_id(chat_id)
-            if event_id and db.get_legioneer_user(event_id) > 9:
+            if event_id and db.get_legioneer_user(event_id) > 31:
                 full_name = db.compose_full_name(user.user_id)
                 await event.bot.send_message(chat_id=chat_id, text=f'Гость удалён пользователем {full_name}')
         except:
@@ -593,7 +595,7 @@ async def cmd_stat(event: MessageCreated):
     text = 'Текущая статистика участников чата:\n'
     text += 'Регистрации / Штрафы\n'
     for userid in all_userids:
-        if userid < 30:
+        if userid < 60:  # Skip legioneer IDs (31-59 for MAX, 10-29 for Telegram)
             continue
         printable_name = db.compose_full_name(userid)
         registered, penalties = db.get_chat_user_rp(chat_id, userid)
@@ -726,7 +728,7 @@ async def handle_callback(event: MessageCallback):
             try:
                 full_name = db.compose_full_name(user.user_id)
                 event_id = db.get_event_id_by_chat_id(chat_id)
-                if event_id and db.get_legioneer_user(event_id) > 9:
+                if event_id and db.get_legioneer_user(event_id) > 31:
                     await event.bot.send_message(chat_id=chat_id, text=f'Гость удалён пользователем {full_name}')
             except:
                 pass
