@@ -575,7 +575,15 @@ async def show_info_impl(event: MessageCreated):
         attachments=[keyboard] if keyboard else None
     )
 
+    # Debug: log the response structure
+    logger.info(f"send_message response: {sent_msg}")
+    if sent_msg:
+        logger.info(f"sent_msg.message: {sent_msg.message if hasattr(sent_msg, 'message') else 'no message attr'}")
+        if hasattr(sent_msg, 'message') and sent_msg.message:
+            logger.info(f"sent_msg.message.body: {sent_msg.message.body if hasattr(sent_msg.message, 'body') else 'no body attr'}")
+
     msg_id = sent_msg.message.body.mid if sent_msg and sent_msg.message else 0
+    logger.info(f"Saving latest_bot_message_id: {msg_id} for chat {chat_id}")
     db.save_latest_bot_message(chat_id, msg_id, event_text)
 
 
