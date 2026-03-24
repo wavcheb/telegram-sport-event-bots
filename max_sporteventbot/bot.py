@@ -13,6 +13,9 @@ import os
 import datetime
 import re
 import asyncio
+import json
+import urllib.request
+import urllib.parse
 from typing import Optional, List
 from loguru import logger
 from dotenv import load_dotenv
@@ -45,6 +48,9 @@ BOT_DIR = os.path.dirname(os.path.abspath(__file__))
 # Payments page URL from environment
 PAYMENTS_PAGE_URL = os.getenv('PAYMENTS_PAGE_URL', '').strip()
 
+# Telegram bot token for cross-platform sync
+TG_BOT_TOKEN = os.getenv('TG_BOT_TOKEN', '').strip()
+
 
 def _coerce_to_datetime(val: object) -> Optional[datetime.datetime]:
     """Accept datetime or str; return datetime or None."""
@@ -76,6 +82,120 @@ def parse_datetime(str_datetime_in_free_form: str) -> Optional[datetime.datetime
         logger.info(f"Invalid time delta: {delta.days} days")
         return None
     return found_date
+
+
+async def sync_to_telegram(linked_chat_id: int, linked_message_id: int, text: str, keyboard_json: str = None):
+    """Update message in linked Telegram chat."""
+    if not TG_BOT_TOKEN:
+        logger.debug("TG_BOT_TOKEN not set, skipping Telegram sync")
+        return False
+
+    try:
+        url = f"https://api.telegram.org/bot{TG_BOT_TOKEN}/editMessageText"
+        data = {
+            'chat_id': linked_chat_id,
+            'message_id': linked_message_id,
+            'text': text,
+            'parse_mode': 'HTML',
+            'disable_web_page_preview': True,
+        }
+        if keyboard_json:
+            data['reply_markup'] = keyboard_json
+
+        payload = urllib.parse.urlencode(data).encode('utf-8')
+        req = urllib.request.Request(url, data=payload, method='POST')
+        req.add_header('Content-Type', 'application/x-www-form-urlencoded')
+
+        # Run in thread pool to not block async loop
+        def do_request():
+            try:
+                with urllib.request.urlopen(req, timeout=10) as resp:
+                    return resp.read()
+            except Exception as e:
+                logger.warning(f"Telegram sync request failed: {e}")
+                return None
+
+        result = await asyncio.to_thread(do_request)
+        if result:
+            logger.info(f"Synced to Telegram chat {linked_chat_id}")
+            return True
+    except Exception as e:
+        logger.warning(f"Failed to sync to Telegram: {e}")
+    return False
+
+
+def create_telegram_message_text(chat_id: int, payment_url: str = None) -> str:
+    """Create event text formatted for Telegram (HTML)."""
+    event_title = db.get_event_text(chat_id) or ""
+    text = '🎉"<b>' + event_title + '</b>"🎉\n'
+
+    players_limit = db.get_event_limit(chat_id) or 0
+    if players_limit:
+        text += f'👥 Лимит игроков: {players_limit}\n'
+
+    raw_dt = db.get_event_datetime(chat_id)
+    event_datetime = _coerce_to_datetime(raw_dt)
+    if event_datetime:
+        text += f"📅 Дата и время: {event_datetime.strftime('%Y-%m-%d, %H:%M')}\n"
+        now = datetime.datetime.now()
+        if event_datetime < now:
+            text += '⏰ Время события истекло.\n'
+        else:
+            delta = event_datetime - now
+            hours = round(delta.seconds / 3600)
+            text += f'⏳ Осталось: {delta.days} дн. и {hours} ч.\n'
+
+    # Links
+    links = []
+    if payment_url:
+        links.append(f'<a href="{payment_url}">💳 Ссылка для оплаты</a>')
+    if PAYMENTS_PAGE_URL:
+        try:
+            event_id = db.get_event_id_by_chat_id(chat_id)
+            primary_event_id = db.get_primary_event_id(event_id)
+            payments_link = f'{PAYMENTS_PAGE_URL}?event={primary_event_id}'
+            links.append(f'<a href="{payments_link}">📊 Текущие платежи</a>')
+        except:
+            pass
+    if links:
+        text += '\n' + '\n'.join(links) + '\n'
+
+    text += '\n<b>Список игроков:</b>\n'
+
+    # Get all players from both platforms via linked events
+    players = db.get_event_users(chat_id) or []
+
+    # Get players from linked event
+    linked_players = []
+    try:
+        event_id = db.get_event_id_by_chat_id(chat_id)
+        linked_players = db.get_linked_event_users(event_id)
+    except:
+        pass
+
+    # Show local players (MAX)
+    for n, user_id in enumerate(players, start=1):
+        if players_limit and n == players_limit + 1:
+            text += '\n<i>Резерв:</i>\n'
+        in_squad = '+' if not players_limit or n <= players_limit else '  '
+        printable_name = db.compose_full_name(user_id)
+        paid = db.get_payment_status(chat_id, user_id)
+        payment_mark = ' [оплачено]' if paid else ''
+        platform_mark = ' [max]'
+        text += f'{in_squad} {n}. {printable_name}{payment_mark}{platform_mark}\n'
+
+    # Show linked players (Telegram)
+    if linked_players:
+        start_n = len(players) + 1
+        for i, (user_id, platform, name) in enumerate(linked_players):
+            n = start_n + i
+            if players_limit and n == players_limit + 1:
+                text += '\n<i>Резерв:</i>\n'
+            in_squad = '+' if not players_limit or n <= players_limit else '  '
+            platform_mark = f' [{platform}]' if platform != 'max' else ' [max]'
+            text += f'{in_squad} {n}. {name}{platform_mark}\n'
+
+    return text
 
 
 def new_chat_id_memoization(chat_id: int, all_known_chat_ids=None):
@@ -795,6 +915,28 @@ async def handle_callback(event: MessageCallback):
         )
         msg_id = sent_msg.message.body.mid if sent_msg and sent_msg.message else 0
         db.save_latest_bot_message(chat_id, msg_id, safe_text)
+
+    # Cross-platform sync: update linked Telegram chat
+    try:
+        linked_info = db.get_linked_chat_message_info(chat_id)
+        if linked_info:
+            linked_chat_id, linked_platform, linked_message_id = linked_info
+            if linked_platform == 'telegram' and linked_message_id:
+                # Generate Telegram-formatted message for the linked chat
+                tg_text = create_telegram_message_text(linked_chat_id, payment_url)
+                # Telegram inline keyboard JSON
+                tg_keyboard = json.dumps({
+                    "inline_keyboard": [
+                        [{"text": "+ Записаться", "callback_data": "ADD"}],
+                        [{"text": "- Отписаться", "callback_data": "REMOVE"}],
+                        [{"text": "+ Добавить друга/легионера", "callback_data": "ADD_LEGIONEER"}],
+                        [{"text": "- Убрать последнего легионера", "callback_data": "REMOVE_LEGIONEER"}],
+                        [{"text": "💰 Оплата подтверждена", "callback_data": "PAY"}],
+                    ]
+                })
+                await sync_to_telegram(linked_chat_id, linked_message_id, tg_text, tg_keyboard)
+    except Exception as e:
+        logger.warning(f"Cross-platform sync failed: {e}")
 
 
 @dp.message_created()

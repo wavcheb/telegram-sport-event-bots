@@ -758,6 +758,25 @@ def get_linked_chat(chat_id: int) -> Optional[Tuple[int, str]]:
     return None
 
 
+def get_linked_chat_message_info(chat_id: int) -> Optional[Tuple[int, str, int]]:
+    """Get linked chat's message info for cross-platform sync.
+    Returns (linked_chat_id, linked_platform, linked_message_id) or None."""
+    linked = get_linked_chat(chat_id)
+    if not linked:
+        return None
+    linked_chat_id, linked_platform = linked
+    conn = reconnect()
+    cur = _exec(conn, '''
+        SELECT latest_bot_message_id FROM Chats
+        WHERE chat_id = %s AND platform = %s LIMIT 1
+    ''', (linked_chat_id, linked_platform))
+    row = cur.fetchone()
+    conn.close()
+    if row and row[0]:
+        return (linked_chat_id, linked_platform, int(row[0]))
+    return None
+
+
 def unlink_chat(chat_id: int) -> bool:
     """Remove link for this chat. Returns True if link was removed."""
     conn = reconnect()
