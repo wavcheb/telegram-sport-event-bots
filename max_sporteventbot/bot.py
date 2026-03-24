@@ -773,6 +773,18 @@ async def handle_callback(event: MessageCallback):
         db.save_latest_bot_message(chat_id, msg_id, safe_text)
 
 
+@dp.message_created()
+async def log_all_messages(event: MessageCreated):
+    """Log all incoming messages for debugging (catch-all fallback)."""
+    chat = event.chat
+    msg = event.message
+    text = msg.body.text if msg and msg.body else ''
+    sender = msg.sender if msg else None
+    sender_name = f"{sender.first_name or ''} {sender.last_name or ''}".strip() if sender else 'unknown'
+    chat_type = getattr(chat, 'type', 'unknown')
+    logger.info(f"[DEBUG] Message: chat_id={chat.chat_id}, type={chat_type}, from={sender_name}, text={text[:100]}")
+
+
 async def main():
     """Main entry point."""
     global bot
