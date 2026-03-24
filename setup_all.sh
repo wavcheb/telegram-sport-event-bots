@@ -39,19 +39,29 @@ chmod +x setup_venv.sh
 ./setup_venv.sh
 echo ""
 
+# Setup MAX Sport Event Bot
+echo "3️⃣  Setting up MAX Sport Event Bot..."
+cd "$PROJECT_DIR/max_sporteventbot"
+if [ ! -f "setup_venv.sh" ]; then
+    echo "❌ Error: setup_venv.sh not found in max_sporteventbot/"
+    exit 1
+fi
+chmod +x setup_venv.sh
+./setup_venv.sh
+echo ""
+
 cd "$PROJECT_DIR"
 
 echo "✅ All bots setup complete!"
 echo ""
 echo "📝 Next steps:"
-echo "1. Configure database credentials:"
-echo "   - sport_event_bot/db_mysql.py"
-echo "   - tournament_bot/db_tournament.py"
+echo "1. Configure environment:"
+echo "   cp .env.example .env"
+echo "   nano .env"
 echo ""
-echo "2. Add bot tokens:"
-echo "   - sport_event_bot/token.txt"
-echo "   - tournament_bot/token.txt"
+echo "2. Set your bot tokens and database credentials in .env"
 echo ""
 echo "3. Run bots:"
 echo "   ./run_sport_event_bot.sh"
 echo "   ./run_tournament_bot.sh"
+echo "   ./run_max_sport_event_bot.sh"
