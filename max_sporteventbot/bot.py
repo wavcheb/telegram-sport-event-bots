@@ -503,7 +503,7 @@ async def cmd_event_remove(event: MessageCreated):
             await event.bot.edit_message(
                 message_id=old_msg_id,
                 text=old_msg_text + "\n\n❌ Событие удалено",
-                attachments=None
+                attachments=[]
             )
         except Exception as e:
             logger.debug(f"Could not remove buttons from old message: {e}")
@@ -560,7 +560,7 @@ async def show_info_impl(event: MessageCreated):
             await event.bot.edit_message(
                 message_id=old_msg_id,
                 text=old_msg_text,
-                attachments=None
+                attachments=[]
             )
         except Exception as e:
             logger.debug(f"Could not remove buttons from old message: {e}")
