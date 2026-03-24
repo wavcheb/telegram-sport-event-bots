@@ -98,7 +98,7 @@ def create_table_chats():
             lang VARCHAR(8),
             priority_members TEXT,
             latest_event_id BIGINT DEFAULT 0,
-            latest_bot_message_id BIGINT DEFAULT 0,
+            latest_bot_message_id VARCHAR(64) DEFAULT '',
             latest_bot_message_text TEXT,
             extra1 TEXT,
             extra2 TEXT,
