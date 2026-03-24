@@ -595,7 +595,7 @@ async def cmd_stat(event: MessageCreated):
     text = 'Текущая статистика участников чата:\n'
     text += 'Регистрации / Штрафы\n'
     for userid in all_userids:
-        if userid < 60:  # Skip legioneer IDs (31-59 for MAX, 10-29 for Telegram)
+        if userid < 50:  # Skip legioneer IDs (31-49 for MAX, 10-29 for Telegram)
             continue
         printable_name = db.compose_full_name(userid)
         registered, penalties = db.get_chat_user_rp(chat_id, userid)

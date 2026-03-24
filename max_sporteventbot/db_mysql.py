@@ -82,8 +82,8 @@ def create_table_users():
     ''')
     conn.commit()
     # Insert or update legioneer users for MAX platform (Друг 1, Друг 2, etc.)
-    # MAX uses user_id 31-59, Telegram uses 10-29
-    rows = [(uid, PLATFORM, f'Друг {uid - 30}') for uid in range(31, 60)]
+    # MAX uses user_id 31-49, Telegram uses 10-29
+    rows = [(uid, PLATFORM, f'Друг {uid - 30}') for uid in range(31, 50)]
     _exec_many(conn, '''
         INSERT INTO Users (user_id, platform, first_name) VALUES (%s, %s, %s)
         ON DUPLICATE KEY UPDATE first_name = VALUES(first_name);
@@ -510,9 +510,9 @@ def get_event_id_by_chat_id(chat_id):
     raise ValueError(f"No event found for chat_id: {chat_id}")
 
 def get_legioneer_user(event_id: int):
-    """Get next available legioneer user_id for MAX (range 31-59)."""
+    """Get next available legioneer user_id for MAX (range 31-49)."""
     conn = reconnect()
-    cur = _exec(conn, 'SELECT COUNT(user_id) FROM Participants WHERE event_id = %s AND user_id BETWEEN 31 AND 59;', (event_id,))
+    cur = _exec(conn, 'SELECT COUNT(user_id) FROM Participants WHERE event_id = %s AND user_id BETWEEN 31 AND 49;', (event_id,))
     count = cur.fetchone()
     conn.close()
     if count is not None:
@@ -948,17 +948,37 @@ def has_user_invited_legioneer(chat_id: int, user_id: int) -> bool:
         WHERE event_id = (
             SELECT event_id FROM Events WHERE status = "Open" AND chat_id = %s AND platform = %s ORDER BY event_id DESC LIMIT 1
         )
-        AND user_id < 30
+        AND user_id BETWEEN 31 AND 49
         AND invited_by = %s
     ''', (chat_id, PLATFORM, user_id))
     row = cur.fetchone()
     conn.close()
     return bool(row and row[0] > 0)
 
+
+def get_unpaid_legioneer(chat_id: int, user_id: int) -> Optional[int]:
+    """Get first unpaid legioneer invited by user. Returns legioneer user_id or None."""
+    conn = reconnect()
+    cur = _exec(conn, '''
+        SELECT p.user_id
+        FROM Participants p
+        WHERE p.event_id = (
+            SELECT event_id FROM Events WHERE status = "Open" AND chat_id = %s AND platform = %s ORDER BY event_id DESC LIMIT 1
+        )
+        AND p.user_id BETWEEN 31 AND 49
+        AND p.invited_by = %s
+        AND p.paid = FALSE
+        ORDER BY p.user_id ASC
+        LIMIT 1
+    ''', (chat_id, PLATFORM, user_id))
+    row = cur.fetchone()
+    conn.close()
+    return row[0] if row else None
+
 def process_payment(chat_id: int, user_id: int) -> dict:
     """
     Handle PAY button press. Returns dict with 'message' and 'success' keys.
-    First press -> payment for self. Subsequent presses (if user has legioneer) -> for friend.
+    First press -> payment for self. Subsequent presses -> for unpaid legioneer.
     """
     if user_id not in (get_event_users(chat_id) or []):
         return {'message': 'You must be registered for the event to confirm payment.', 'success': False}
@@ -969,7 +989,10 @@ def process_payment(chat_id: int, user_id: int) -> dict:
         record_payment_log(chat_id, user_id, for_friend=False)
         return {'message': 'Payment confirmed!', 'success': True}
 
-    if has_user_invited_legioneer(chat_id, user_id):
+    # Check for unpaid legioneer invited by this user
+    legioneer_id = get_unpaid_legioneer(chat_id, user_id)
+    if legioneer_id:
+        set_payment_status(chat_id, legioneer_id, True)
         record_payment_log(chat_id, user_id, for_friend=True)
         return {'message': 'Payment for friend confirmed!', 'success': True}
 
