@@ -503,7 +503,7 @@ async def cmd_event_remove(event: MessageCreated):
             await event.bot.edit_message(
                 message_id=old_msg_id,
                 text=old_msg_text + "\n\n❌ Событие удалено",
-                attachments=None
+                attachments=[]
             )
         except Exception as e:
             logger.debug(f"Could not remove buttons from old message: {e}")
@@ -560,7 +560,7 @@ async def show_info_impl(event: MessageCreated):
             await event.bot.edit_message(
                 message_id=old_msg_id,
                 text=old_msg_text,
-                attachments=None
+                attachments=[]
             )
         except Exception as e:
             logger.debug(f"Could not remove buttons from old message: {e}")
@@ -948,8 +948,8 @@ async def handle_callback(event: MessageCallback):
         if linked_info:
             linked_chat_id, linked_platform, linked_message_id = linked_info
             if linked_platform == 'telegram' and linked_message_id:
-                # Generate Telegram-formatted message for the linked chat
-                tg_text = create_telegram_message_text(linked_chat_id, payment_url)
+                # Generate Telegram-formatted message using original chat_id's event data
+                tg_text = create_telegram_message_text(chat_id, payment_url)
                 # Telegram inline keyboard JSON
                 tg_keyboard = json.dumps({
                     "inline_keyboard": [
