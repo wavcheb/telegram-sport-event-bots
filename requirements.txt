@@ -6,7 +6,7 @@ httpx[socks]>=0.24.0
 recurrent>=0.4.1
 
 # Database
-mysql-connector-python>=8.0.33
+psycopg2-binary>=2.9.9
 
 # Date/Time parsing
 parsedatetime>=2.6

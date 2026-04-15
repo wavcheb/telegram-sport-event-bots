@@ -29,10 +29,10 @@ load_dotenv()
 
 # Support both package mode and standalone mode
 try:
-    from . import db_mysql as db
+    from . import db_postgres as db
     from . import telegraph as tph
 except ImportError:
-    import db_mysql as db
+    import db_postgres as db
     import telegraph as tph
 import asyncio
 from typing import Optional, Callable
@@ -50,9 +50,6 @@ LOCALE_DIR = os.path.join(BOT_DIR, 'locale')
 
 # Payments page URL from environment (replaces Telegraph if set)
 PAYMENTS_PAGE_URL = os.getenv('PAYMENTS_PAGE_URL', '').strip()
-
-# MAX bot token for cross-platform sync
-MAX_BOT_TOKEN = os.getenv('MAX_BOT_TOKEN', '').strip()
 
 # ==================== URL Metadata Parser ====================
 
@@ -129,147 +126,7 @@ def _coerce_to_datetime(val: object) -> Optional[datetime.datetime]:
     return None
 
 
-async def sync_to_max(linked_chat_id: int, linked_message_id: str, text: str):
-    """Update message in linked MAX chat (HTML formatted)."""
-    if not MAX_BOT_TOKEN:
-        logger.debug("MAX_BOT_TOKEN not set, skipping MAX sync")
-        return False
-
-    try:
-        # MAX API migrated to platform-api.max.ru with Authorization header
-        url = f"https://platform-api.max.ru/messages?message_id={linked_message_id}"
-        data = json.dumps({
-            'text': text,
-            'format': 'html',
-        }, ensure_ascii=False).encode('utf-8')
-        req = urllib.request.Request(url, data=data, method='PUT')
-        req.add_header('Content-Type', 'application/json; charset=utf-8')
-        req.add_header('Authorization', MAX_BOT_TOKEN)
-
-        def do_request():
-            try:
-                with urllib.request.urlopen(req, timeout=10) as resp:
-                    return resp.read()
-            except urllib.error.HTTPError as e:
-                try:
-                    body = e.read().decode('utf-8', errors='replace')[:300]
-                except Exception:
-                    body = ''
-                logger.warning(f"MAX sync HTTP error: {e.code} {e.reason} {body}")
-                return None
-            except urllib.error.URLError as e:
-                logger.warning(f"MAX sync URL error: {e.reason}")
-                return None
-            except Exception as e:
-                logger.warning(f"MAX sync request failed: {e}")
-                return None
-
-        result = await asyncio.to_thread(do_request)
-        if result:
-            logger.info(f"Synced to MAX successfully")
-            return True
-    except Exception as e:
-        logger.warning(f"Failed to sync to MAX: {e}")
-    return False
-
-
-def _html_escape(s) -> str:
-    """HTML-escape for MAX (html format)."""
-    if s is None:
-        return ""
-    return (
-        str(s)
-        .replace('&', '&amp;')
-        .replace('<', '&lt;')
-        .replace('>', '&gt;')
-        .replace('"', '&quot;')
-    )
-
-
-def create_max_message_text(chat_id: int, payment_url: str = None) -> str:
-    """Create event text formatted for MAX (HTML)."""
-    event_title = db.get_event_text(chat_id) or ""
-    text = f'🎉 "<b>{_html_escape(event_title)}</b>" 🎉\n'
-
-    players_limit = db.get_event_limit(chat_id) or 0
-    if players_limit:
-        text += f'👥 Лимит игроков: {players_limit}\n'
-
-    raw_dt = db.get_event_datetime(chat_id)
-    event_datetime = _coerce_to_datetime(raw_dt)
-    if event_datetime:
-        text += f"📅 Дата и время: {event_datetime.strftime('%Y-%m-%d, %H:%M')}\n"
-        now = datetime.datetime.now()
-        if event_datetime < now:
-            text += '⏰ Время события истекло.\n'
-        else:
-            delta = event_datetime - now
-            hours = round(delta.seconds / 3600)
-            text += f'⏳ Осталось: {delta.days} дн. и {hours} ч.\n'
-
-    # Links (HTML hyperlinks)
-    links = []
-    if payment_url:
-        links.append(f'<a href="{_html_escape(payment_url)}">💳 Ссылка для оплаты</a>')
-    if PAYMENTS_PAGE_URL:
-        try:
-            event_id = db.get_event_id_by_chat_id(chat_id)
-            primary_event_id = db.get_primary_event_id(event_id)
-            payments_link = f'{PAYMENTS_PAGE_URL}?event={primary_event_id}'
-            links.append(f'<a href="{_html_escape(payments_link)}">📊 Текущие платежи</a>')
-        except:
-            pass
-    if links:
-        text += '\n' + '\n'.join(links) + '\n'
-
-    text += '\n<b>Список игроков:</b>\n'
-
-    # Get all players
-    players = db.get_event_users(chat_id) or []
-
-    # Get players from linked event
-    linked_players = []
-    try:
-        event_id = db.get_event_id_by_chat_id(chat_id)
-        linked_players = db.get_linked_event_users(event_id)
-    except:
-        pass
-
-    # Show local players (Telegram)
-    for n, user_id in enumerate(players, start=1):
-        if players_limit and n == players_limit + 1:
-            text += '\n<i>Резерв:</i>\n'
-        in_squad = '+' if not players_limit or n <= players_limit else '  '
-        printable_name = _html_escape(db.compose_full_name(user_id))
-        paid = db.get_payment_status(chat_id, user_id)
-        payment_mark = ' 💰' if paid else ''
-        platform_mark = ' [telegram]'
-        text += f'{in_squad} {n}. {printable_name}{payment_mark}{platform_mark}\n'
-
-    # Show linked players (MAX)
-    if linked_players:
-        start_n = len(players) + 1
-        for i, (user_id, platform, name) in enumerate(linked_players):
-            n = start_n + i
-            if players_limit and n == players_limit + 1:
-                text += '\n<i>Резерв:</i>\n'
-            in_squad = '+' if not players_limit or n <= players_limit else '  '
-            safe_name = _html_escape(name)
-            platform_mark = f' [{_html_escape(platform)}]' if platform != 'telegram' else ' [telegram]'
-            text += f'{in_squad} {n}. {safe_name}{platform_mark}\n'
-
-    # Cancelled applications with strikethrough
-    canceled_players = db.get_event_revoked_users(chat_id) or []
-    if canceled_players:
-        text += '\n<i>Отказавшиеся:</i>\n'
-        for canceled_user_id in canceled_players:
-            cancel_datetime = db.get_user_cancellation_datetime(chat_id, canceled_user_id)
-            cd = _coerce_to_datetime(cancel_datetime)
-            cd_txt = cd.strftime('%Y-%m-%d %H:%M') if cd else str(cancel_datetime)[:16]
-            printable_name = _html_escape(db.compose_full_name(canceled_user_id))
-            text += f'  <s>{printable_name} - {_html_escape(cd_txt)}</s>\n'
-
-    return text
+# Removed MAX sync functions
 
 
 def make_translatable_user_id_context(func):
@@ -304,9 +161,12 @@ def _serialize_inline_kb(kb: InlineKeyboardMarkup) -> str:
         rows.append("|".join(f"{btn.text}::{btn.callback_data or btn.url or ''}" for btn in row))
     return "\n".join(rows)
 
-def new_chat_id_memoization(chat_id: int, lang: str, all_known_chat_ids=db.get_all_chat_ids()):
-    if chat_id not in all_known_chat_ids:
-        all_known_chat_ids.add(chat_id)
+KNOWN_CHAT_IDS = set()
+
+def new_chat_id_memoization(chat_id: int, lang: str):
+    global KNOWN_CHAT_IDS
+    if chat_id not in KNOWN_CHAT_IDS:
+        KNOWN_CHAT_IDS.add(chat_id)
         db.register_new_chat_id(chat_id, lang)
         logger.info(f'New chat_id: {chat_id}')
 
@@ -392,26 +252,7 @@ async def button(update, context):
             else:
                 logger.exception(e)
 
-    # Cross-platform sync: update linked MAX chat
-    try:
-        # Debug: check link first
-        linked_chat = db.get_linked_chat(this_chat_id)
-        logger.info(f"TG->MAX sync: this_chat_id={this_chat_id}, linked_chat={linked_chat}")
-
-        linked_info = db.get_linked_chat_message_info(this_chat_id)
-        logger.info(f"TG->MAX sync: linked_info={linked_info}")
-
-        if linked_info:
-            linked_chat_id, linked_platform, linked_message_id = linked_info
-            if linked_platform == 'max' and linked_message_id:
-                # Use this_chat_id (TG) to get event data, not linked_chat_id (MAX)
-                max_text = create_max_message_text(this_chat_id, payment_url)
-                logger.info(f"Syncing TG->MAX: tg_chat={this_chat_id} -> max_chat={linked_chat_id}, msg_id={linked_message_id}")
-                await sync_to_max(linked_chat_id, linked_message_id, max_text)
-        elif linked_chat:
-            logger.warning(f"TG->MAX sync: chat linked but no message_id. Did you run /info in MAX chat?")
-    except Exception as e:
-        logger.warning(f"Cross-platform sync failed: {e}")
+    # Removed cross-platform sync logic
 
     await query.answer()
 
@@ -613,39 +454,8 @@ def create_event_full_text(this_chat_id: int, translate: Callable[[str], str],
     text_players = ''
     players = db.get_event_users(this_chat_id) or []
 
-    # Get players from linked event if exists
-    linked_players = []
-    try:
-        event_id = db.get_event_id_by_chat_id(this_chat_id)
-        linked_players = db.get_linked_event_users(event_id)
-    except:
-        pass
-
-    # Show local players
-    for n, user_id in enumerate(players, start=1):
-        if players_limit and n == players_limit + 1:
-            text_players += '\t\t\n' + translate('Reserve') + ':\n'
-        in_squad = '➕' if not players_limit or n <= players_limit else '      '
-        printable_name = db.compose_full_name(user_id)
-        games_registered, penalties = db.get_chat_user_rp(this_chat_id, user_id)
-        paid = db.get_payment_status(this_chat_id, user_id)
-        payment_emoji = '💰' if paid else ''
-        name_with_cards = player_name_with_cards(games_registered, penalties, printable_name, translate)
-        text_players += in_squad + f'{n}. {_wrap_closed(name_with_cards + " " + payment_emoji)}\n'
-
-    # Show linked players from other platform
-    if linked_players:
-        start_n = len(players) + 1
-        for i, (user_id, platform, name) in enumerate(linked_players):
-            n = start_n + i
-            if players_limit and n == players_limit + 1:
-                text_players += '\t\t\n' + translate('Reserve') + ':\n'
-            in_squad = '➕' if not players_limit or n <= players_limit else '      '
-            platform_mark = f' [{platform}]'
-            text_players += in_squad + f'{n}. {_wrap_closed(name + platform_mark)}\n'
-
     text += '\n' + text_players
-    total_players = len(players) + len(linked_players)
+    total_players = len(players)
     canceled_players = db.get_event_revoked_users(this_chat_id) or []
     if canceled_players:
         text += '\n' + translate('Revoked applications') + ':'
@@ -1098,6 +908,10 @@ async def main():
 
     # Initialize database tables and run migrations
     db.init_database()
+
+    # Load known chat IDs
+    global KNOWN_CHAT_IDS
+    KNOWN_CHAT_IDS = db.get_all_chat_ids()
 
     # Добавление обработчиков команд
     application.add_handler(CommandHandler('add', add_player))
