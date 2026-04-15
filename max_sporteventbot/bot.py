@@ -42,7 +42,14 @@ from maxapi.types import (
     CallbackButton,
 )
 from maxapi.utils.inline_keyboard import InlineKeyboardBuilder
-from maxapi.enums import ParseMode
+
+# ParseMode enum may not be exported in older maxapi versions;
+# the library accepts the string "html" directly, so we use that as fallback.
+try:
+    from maxapi.enums import ParseMode
+    HTML_FORMAT = ParseMode.HTML
+except ImportError:
+    HTML_FORMAT = "html"
 
 
 def _escape_html(s: str) -> str:
@@ -545,7 +552,7 @@ async def cmd_event_add(event: MessageCreated):
         chat_id=chat_id,
         text=message_text,
         attachments=[keyboard] if keyboard else None,
-        parse_mode=ParseMode.HTML,
+        parse_mode=HTML_FORMAT,
     )
 
     msg_id = sent_msg.message.body.mid if sent_msg and sent_msg.message else ""
@@ -575,7 +582,7 @@ async def cmd_event_remove(event: MessageCreated):
                 message_id=old_msg_id,
                 text=closed_text,
                 attachments=[],
-                parse_mode=ParseMode.HTML,
+                parse_mode=HTML_FORMAT,
             )
             db.save_latest_bot_message(chat_id, old_msg_id, closed_text)
         except Exception as e:
@@ -644,7 +651,7 @@ async def show_info_impl(event: MessageCreated, bot=None):
                 message_id=old_msg_id,
                 text=event_text,
                 attachments=[keyboard] if keyboard else [],
-                parse_mode=ParseMode.HTML,
+                parse_mode=HTML_FORMAT,
             )
             db.save_latest_bot_message(chat_id, old_msg_id, event_text)
             edited = True
@@ -656,7 +663,7 @@ async def show_info_impl(event: MessageCreated, bot=None):
             chat_id=chat_id,
             text=event_text,
             attachments=[keyboard] if keyboard else None,
-            parse_mode=ParseMode.HTML,
+            parse_mode=HTML_FORMAT,
         )
         msg_id = sent_msg.message.body.mid if sent_msg and sent_msg.message else ""
         db.save_latest_bot_message(chat_id, msg_id, event_text)
@@ -760,7 +767,7 @@ async def cmd_fix(event: MessageCreated):
                 message_id=old_msg_id,
                 text=closed_text,
                 attachments=[],
-                parse_mode=ParseMode.HTML,
+                parse_mode=HTML_FORMAT,
             )
             db.save_latest_bot_message(chat_id, old_msg_id, closed_text)
         except Exception as e:
@@ -972,7 +979,7 @@ async def cmd_event_copy(event: MessageCreated):
         chat_id=chat_id,
         text=message_text,
         attachments=[keyboard] if keyboard else None,
-        parse_mode=ParseMode.HTML,
+        parse_mode=HTML_FORMAT,
     )
     msg_id = sent_msg.message.body.mid if sent_msg and sent_msg.message else ""
     db.save_latest_bot_message(chat_id, msg_id, message_text)
@@ -1032,7 +1039,7 @@ async def handle_callback(event: MessageCallback):
             message_id=event.message.body.mid,
             text=safe_text,
             attachments=[keyboard] if keyboard else None,
-            parse_mode=ParseMode.HTML,
+            parse_mode=HTML_FORMAT,
         )
         db.save_latest_bot_message(chat_id, event.message.body.mid, safe_text)
     except Exception as e:
@@ -1042,7 +1049,7 @@ async def handle_callback(event: MessageCallback):
             chat_id=chat_id,
             text=safe_text,
             attachments=[keyboard] if keyboard else None,
-            parse_mode=ParseMode.HTML,
+            parse_mode=HTML_FORMAT,
         )
         msg_id = sent_msg.message.body.mid if sent_msg and sent_msg.message else ""
         db.save_latest_bot_message(chat_id, msg_id, safe_text)
