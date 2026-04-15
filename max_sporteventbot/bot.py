@@ -16,6 +16,7 @@ import asyncio
 import json
 import urllib.request
 import urllib.parse
+import urllib.error
 from typing import Optional, List
 from loguru import logger
 from dotenv import load_dotenv
@@ -41,6 +42,20 @@ from maxapi.types import (
     CallbackButton,
 )
 from maxapi.utils.inline_keyboard import InlineKeyboardBuilder
+from maxapi.enums import ParseMode
+
+
+def _escape_html(s: str) -> str:
+    """Escape characters unsafe for MAX HTML parse mode."""
+    if s is None:
+        return ""
+    return (
+        str(s)
+        .replace('&', '&amp;')
+        .replace('<', '&lt;')
+        .replace('>', '&gt;')
+        .replace('"', '&quot;')
+    )
 
 # Bot directory paths
 BOT_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -50,6 +65,10 @@ PAYMENTS_PAGE_URL = os.getenv('PAYMENTS_PAGE_URL', '').strip()
 
 # Telegram bot token for cross-platform sync
 TG_BOT_TOKEN = os.getenv('TG_BOT_TOKEN', '').strip()
+
+# Optional proxy for Telegram API (regions where Telegram is blocked)
+# Supported: socks5://user:pass@host:port, http://host:port, https://host:port
+TELEGRAM_PROXY = os.getenv('TELEGRAM_PROXY', '').strip()
 
 
 def _coerce_to_datetime(val: object) -> Optional[datetime.datetime]:
@@ -84,50 +103,83 @@ def parse_datetime(str_datetime_in_free_form: str) -> Optional[datetime.datetime
     return found_date
 
 
+def _tg_request_sync(url: str, data: dict) -> Optional[bytes]:
+    """Synchronous POST to Telegram API with optional proxy support.
+    Uses `requests` when available (SOCKS via PySocks), otherwise urllib.
+    """
+    # Try requests first - supports SOCKS via requests[socks]
+    try:
+        import requests  # type: ignore
+        proxies = None
+        if TELEGRAM_PROXY:
+            proxies = {'http': TELEGRAM_PROXY, 'https': TELEGRAM_PROXY}
+        resp = requests.post(url, data=data, proxies=proxies, timeout=15)
+        if resp.status_code != 200:
+            logger.warning(f"Telegram sync HTTP {resp.status_code}: {resp.text[:300]}")
+            return None
+        return resp.content
+    except ImportError:
+        pass
+    except Exception as e:
+        logger.warning(f"Telegram sync (requests) failed: {e}")
+        return None
+
+    # Fallback: urllib with HTTP/HTTPS proxy only (no SOCKS)
+    try:
+        payload = urllib.parse.urlencode(data).encode('utf-8')
+        if TELEGRAM_PROXY and TELEGRAM_PROXY.startswith(('http://', 'https://')):
+            proxy_handler = urllib.request.ProxyHandler({
+                'http': TELEGRAM_PROXY,
+                'https': TELEGRAM_PROXY,
+            })
+            opener = urllib.request.build_opener(proxy_handler)
+        else:
+            if TELEGRAM_PROXY:
+                logger.warning("TELEGRAM_PROXY is SOCKS but `requests[socks]` not installed; skipping proxy")
+            opener = urllib.request.build_opener()
+        req = urllib.request.Request(url, data=payload, method='POST')
+        req.add_header('Content-Type', 'application/x-www-form-urlencoded')
+        with opener.open(req, timeout=15) as resp:
+            return resp.read()
+    except urllib.error.HTTPError as e:
+        try:
+            body = e.read().decode('utf-8', errors='replace')[:300]
+        except Exception:
+            body = ''
+        logger.warning(f"Telegram sync HTTP error: {e.code} {e.reason} {body}")
+    except Exception as e:
+        logger.warning(f"Telegram sync (urllib) failed: {e}")
+    return None
+
+
 async def sync_to_telegram(linked_chat_id: int, linked_message_id: int, text: str, keyboard_json: str = None):
     """Update message in linked Telegram chat."""
     if not TG_BOT_TOKEN:
         logger.debug("TG_BOT_TOKEN not set, skipping Telegram sync")
         return False
 
-    try:
-        url = f"https://api.telegram.org/bot{TG_BOT_TOKEN}/editMessageText"
-        data = {
-            'chat_id': linked_chat_id,
-            'message_id': linked_message_id,
-            'text': text,
-            'parse_mode': 'HTML',
-            'disable_web_page_preview': True,
-        }
-        if keyboard_json:
-            data['reply_markup'] = keyboard_json
+    url = f"https://api.telegram.org/bot{TG_BOT_TOKEN}/editMessageText"
+    data = {
+        'chat_id': linked_chat_id,
+        'message_id': linked_message_id,
+        'text': text,
+        'parse_mode': 'HTML',
+        'disable_web_page_preview': 'true',
+    }
+    if keyboard_json:
+        data['reply_markup'] = keyboard_json
 
-        payload = urllib.parse.urlencode(data).encode('utf-8')
-        req = urllib.request.Request(url, data=payload, method='POST')
-        req.add_header('Content-Type', 'application/x-www-form-urlencoded')
-
-        # Run in thread pool to not block async loop
-        def do_request():
-            try:
-                with urllib.request.urlopen(req, timeout=10) as resp:
-                    return resp.read()
-            except Exception as e:
-                logger.warning(f"Telegram sync request failed: {e}")
-                return None
-
-        result = await asyncio.to_thread(do_request)
-        if result:
-            logger.info(f"Synced to Telegram chat {linked_chat_id}")
-            return True
-    except Exception as e:
-        logger.warning(f"Failed to sync to Telegram: {e}")
+    result = await asyncio.to_thread(_tg_request_sync, url, data)
+    if result:
+        logger.info(f"Synced to Telegram chat {linked_chat_id}")
+        return True
     return False
 
 
 def create_telegram_message_text(chat_id: int, payment_url: str = None) -> str:
     """Create event text formatted for Telegram (HTML)."""
     event_title = db.get_event_text(chat_id) or ""
-    text = '🎉"<b>' + event_title + '</b>"🎉\n'
+    text = '🎉"<b>' + _escape_html(event_title) + '</b>"🎉\n'
 
     players_limit = db.get_event_limit(chat_id) or 0
     if players_limit:
@@ -148,13 +200,13 @@ def create_telegram_message_text(chat_id: int, payment_url: str = None) -> str:
     # Links
     links = []
     if payment_url:
-        links.append(f'<a href="{payment_url}">💳 Ссылка для оплаты</a>')
+        links.append(f'<a href="{_escape_html(payment_url)}">💳 Ссылка для оплаты</a>')
     if PAYMENTS_PAGE_URL:
         try:
             event_id = db.get_event_id_by_chat_id(chat_id)
             primary_event_id = db.get_primary_event_id(event_id)
             payments_link = f'{PAYMENTS_PAGE_URL}?event={primary_event_id}'
-            links.append(f'<a href="{payments_link}">📊 Текущие платежи</a>')
+            links.append(f'<a href="{_escape_html(payments_link)}">📊 Текущие платежи</a>')
         except:
             pass
     if links:
@@ -178,9 +230,9 @@ def create_telegram_message_text(chat_id: int, payment_url: str = None) -> str:
         if players_limit and n == players_limit + 1:
             text += '\n<i>Резерв:</i>\n'
         in_squad = '+' if not players_limit or n <= players_limit else '  '
-        printable_name = db.compose_full_name(user_id)
+        printable_name = _escape_html(db.compose_full_name(user_id))
         paid = db.get_payment_status(chat_id, user_id)
-        payment_mark = ' [оплачено]' if paid else ''
+        payment_mark = ' 💰' if paid else ''
         platform_mark = ' [max]'
         text += f'{in_squad} {n}. {printable_name}{payment_mark}{platform_mark}\n'
 
@@ -192,8 +244,20 @@ def create_telegram_message_text(chat_id: int, payment_url: str = None) -> str:
             if players_limit and n == players_limit + 1:
                 text += '\n<i>Резерв:</i>\n'
             in_squad = '+' if not players_limit or n <= players_limit else '  '
-            platform_mark = f' [{platform}]' if platform != 'max' else ' [max]'
-            text += f'{in_squad} {n}. {name}{platform_mark}\n'
+            safe_name = _escape_html(name)
+            platform_mark = f' [{_escape_html(platform)}]' if platform != 'max' else ' [max]'
+            text += f'{in_squad} {n}. {safe_name}{platform_mark}\n'
+
+    # Cancelled applications with strikethrough
+    canceled_players = db.get_event_revoked_users(chat_id) or []
+    if canceled_players:
+        text += '\n<i>Отказавшиеся:</i>\n'
+        for canceled_user_id in canceled_players:
+            cancel_datetime = db.get_user_cancellation_datetime(chat_id, canceled_user_id)
+            cd = _coerce_to_datetime(cancel_datetime)
+            cd_txt = cd.strftime('%Y-%m-%d %H:%M') if cd else str(cancel_datetime)[:16]
+            printable_name = _escape_html(db.compose_full_name(canceled_user_id))
+            text += f'  <s>{printable_name} - {_escape_html(cd_txt)}</s>\n'
 
     return text
 
@@ -230,8 +294,8 @@ def build_event_keyboard():
     )
 
 
-def create_event_full_text(this_chat_id: int, payment_url: str = None) -> str:
-    """Create full event text with players list (Russian)."""
+def create_event_full_text(this_chat_id: int, payment_url: str = None, closed: bool = False) -> str:
+    """Create full event text with players list (HTML, Russian)."""
     def player_name_with_cards(games_registered, penalties, full_name):
         printable_name = full_name
         games_played = games_registered - penalties
@@ -243,7 +307,11 @@ def create_event_full_text(this_chat_id: int, payment_url: str = None) -> str:
         return printable_name
 
     event_title = db.get_event_text(this_chat_id) or ""
-    text = '🎉 "' + event_title + '" 🎉\n'
+    title_html = _escape_html(event_title)
+    if closed:
+        text = f'🎉 "<s><b>{title_html}</b></s>" 🎉  🔒 <i>Событие закрыто</i>\n'
+    else:
+        text = f'🎉 "<b>{title_html}</b>" 🎉\n'
     players_limit = db.get_event_limit(this_chat_id) or 0
     if players_limit:
         text += f'👥 Лимит игроков: {players_limit}\n'
@@ -259,23 +327,23 @@ def create_event_full_text(this_chat_id: int, payment_url: str = None) -> str:
             hours = round(delta.seconds / 3600)
             text += f'⏳ Осталось: {delta.days} дн. и {hours} ч.\n'
 
-    # Links section
+    # Links section (HTML hyperlinks)
     links = []
     if payment_url:
-        links.append(f'💳 Ссылка для оплаты: {payment_url}')
+        links.append(f'<a href="{_escape_html(payment_url)}">💳 Ссылка для оплаты</a>')
     if PAYMENTS_PAGE_URL:
         try:
             event_id = db.get_event_id_by_chat_id(this_chat_id)
             # Use primary (original) event_id for linked events
             primary_event_id = db.get_primary_event_id(event_id)
             payments_link = f'{PAYMENTS_PAGE_URL}?event={primary_event_id}'
-            links.append(f'📊 Текущие платежи: {payments_link}')
+            links.append(f'<a href="{_escape_html(payments_link)}">📊 Текущие платежи</a>')
         except:
             pass
     if links:
         text += '\n' + '\n'.join(links) + '\n'
 
-    text += '\nСписок игроков:\n'
+    text += '\n<b>Список игроков:</b>\n'
     text_players = ''
     players = db.get_event_users(this_chat_id) or []
 
@@ -287,16 +355,20 @@ def create_event_full_text(this_chat_id: int, payment_url: str = None) -> str:
     except:
         pass
 
+    def _wrap_closed(s: str) -> str:
+        return f'<s>{s}</s>' if closed else s
+
     # Show local players
     for n, user_id in enumerate(players, start=1):
         if players_limit and n == players_limit + 1:
-            text_players += '\nРезерв:\n'
+            text_players += '\n<i>Резерв:</i>\n'
         in_squad = '+' if not players_limit or n <= players_limit else '  '
-        printable_name = db.compose_full_name(user_id)
+        printable_name = _escape_html(db.compose_full_name(user_id))
         games_registered, penalties = db.get_chat_user_rp(this_chat_id, user_id)
         paid = db.get_payment_status(this_chat_id, user_id)
         payment_mark = ' [оплачено]' if paid else ''
-        text_players += f'{in_squad} {n}. {player_name_with_cards(games_registered, penalties, printable_name)}{payment_mark}\n'
+        name_line = player_name_with_cards(games_registered, penalties, printable_name)
+        text_players += f'{in_squad} {n}. {_wrap_closed(name_line + payment_mark)}\n'
 
     # Show linked players
     if linked_players:
@@ -304,22 +376,24 @@ def create_event_full_text(this_chat_id: int, payment_url: str = None) -> str:
         for i, (user_id, platform, name) in enumerate(linked_players):
             n = start_n + i
             if players_limit and n == players_limit + 1:
-                text_players += '\nРезерв:\n'
+                text_players += '\n<i>Резерв:</i>\n'
             in_squad = '+' if not players_limit or n <= players_limit else '  '
-            platform_mark = f' [{platform}]'
-            text_players += f'{in_squad} {n}. {name}{platform_mark}\n'
+            safe_name = _escape_html(name)
+            platform_mark = f' [{_escape_html(platform)}]'
+            text_players += f'{in_squad} {n}. {_wrap_closed(safe_name + platform_mark)}\n'
 
     text += text_players
     total_players = len(players) + len(linked_players)
     canceled_players = db.get_event_revoked_users(this_chat_id) or []
     if canceled_players:
-        text += '\nОтказавшиеся:'
+        text += '\n<i>Отказавшиеся:</i>\n'
         for canceled_user_id in canceled_players:
             cancel_datetime = db.get_user_cancellation_datetime(this_chat_id, canceled_user_id)
             cd = _coerce_to_datetime(cancel_datetime)
             cd_txt = cd.strftime('%Y-%m-%d %H:%M') if cd else str(cancel_datetime)[:16]
-            printable_name = db.compose_full_name(canceled_user_id)
-            text += f'  {printable_name} - {cd_txt}\n'
+            printable_name = _escape_html(db.compose_full_name(canceled_user_id))
+            # Strikethrough for all cancelled applications
+            text += f'  <s>{printable_name} - {_escape_html(cd_txt)}</s>\n'
     elif total_players == 0:
         text += '\nПока нет заявок'
     safe = text.strip()
@@ -463,29 +537,18 @@ async def cmd_event_add(event: MessageCreated):
     if payment_url:
         db.set_event_payment_url(chat_id, payment_url)
 
-    # Build message text with links
-    message_text = "Создано новое событие:\n\n" + event_text
-    links = []
-    if payment_url:
-        links.append(f'Ссылка для оплаты: {payment_url}')
-    if PAYMENTS_PAGE_URL:
-        try:
-            event_id = db.get_event_id_by_chat_id(chat_id)
-            payments_link = f'{PAYMENTS_PAGE_URL}?event={event_id}'
-            links.append(f'Текущие платежи: {payments_link}')
-        except:
-            pass
-    if links:
-        message_text += '\n\n' + '\n'.join(links)
+    # Build HTML message text with full event info and links
+    message_text = create_event_full_text(chat_id, payment_url).strip() or " "
 
     keyboard = build_event_keyboard()
     sent_msg = await event.bot.send_message(
         chat_id=chat_id,
         text=message_text,
-        attachments=[keyboard] if keyboard else None
+        attachments=[keyboard] if keyboard else None,
+        parse_mode=ParseMode.HTML,
     )
 
-    msg_id = sent_msg.message.body.mid if sent_msg and sent_msg.message else 0
+    msg_id = sent_msg.message.body.mid if sent_msg and sent_msg.message else ""
     db.save_latest_bot_message(chat_id, msg_id, message_text)
 
 
@@ -495,18 +558,28 @@ async def cmd_event_remove(event: MessageCreated):
     chat_id = event.chat.chat_id
     new_chat_id_memoization(chat_id)
 
-    # Remove buttons from last bot message
+    if not db.get_event_text(chat_id):
+        db.close_all_open_events_for_chat(chat_id)
+        await event.message.answer('Событие удалено.')
+        return
+
+    # Build fresh closed-state text (regenerated, not fetched from DB) to
+    # avoid any encoding glitches with stored text.
+    payment_url = db.get_event_payment_url(chat_id)
+    closed_text = create_event_full_text(chat_id, payment_url, closed=True).strip() or " "
+
     old_msg_id = db.get_latest_bot_message_id(chat_id)
-    old_msg_text = db.get_latest_bot_message_text(chat_id)
-    if old_msg_id and old_msg_text:
+    if old_msg_id:
         try:
             await event.bot.edit_message(
                 message_id=old_msg_id,
-                text=old_msg_text + "\n\n❌ Событие удалено",
-                attachments=[]
+                text=closed_text,
+                attachments=[],
+                parse_mode=ParseMode.HTML,
             )
+            db.save_latest_bot_message(chat_id, old_msg_id, closed_text)
         except Exception as e:
-            logger.debug(f"Could not remove buttons from old message: {e}")
+            logger.info(f"Could not edit old message on event_remove: {e}")
 
     db.close_all_open_events_for_chat(chat_id)
     await event.message.answer('Событие удалено.')
@@ -543,8 +616,13 @@ async def cmd_info(event: MessageCreated):
     await show_info_impl(event)
 
 
-async def show_info_impl(event: MessageCreated):
-    """Implementation of show info."""
+async def show_info_impl(event: MessageCreated, bot=None):
+    """Show/refresh event info.
+
+    Strategy: edit the existing bot message in place if present.
+    This keeps the event post at the top of the chat and avoids relying
+    on button-removal (which is buggy in MAX desktop).
+    """
     chat_id = event.chat.chat_id
     new_chat_id_memoization(chat_id)
 
@@ -552,39 +630,36 @@ async def show_info_impl(event: MessageCreated):
         await event.message.answer('Нет активных событий')
         return
 
-    # Remove buttons from old message before sending new one
-    old_msg_id = db.get_latest_bot_message_id(chat_id)
-    old_msg_text = db.get_latest_bot_message_text(chat_id)
-    if old_msg_id and old_msg_text:
-        try:
-            await event.bot.edit_message(
-                message_id=old_msg_id,
-                text=old_msg_text,
-                attachments=[]
-            )
-        except Exception as e:
-            logger.debug(f"Could not remove buttons from old message: {e}")
-
     payment_url = db.get_event_payment_url(chat_id)
     event_text = create_event_full_text(chat_id, payment_url).strip() or " "
-
     keyboard = build_event_keyboard()
-    sent_msg = await event.bot.send_message(
-        chat_id=chat_id,
-        text=event_text,
-        attachments=[keyboard] if keyboard else None
-    )
 
-    # Debug: log the response structure
-    logger.info(f"send_message response: {sent_msg}")
-    if sent_msg:
-        logger.info(f"sent_msg.message: {sent_msg.message if hasattr(sent_msg, 'message') else 'no message attr'}")
-        if hasattr(sent_msg, 'message') and sent_msg.message:
-            logger.info(f"sent_msg.message.body: {sent_msg.message.body if hasattr(sent_msg.message, 'body') else 'no body attr'}")
+    _bot = bot or event.bot
+    old_msg_id = db.get_latest_bot_message_id(chat_id)
 
-    msg_id = sent_msg.message.body.mid if sent_msg and sent_msg.message else 0
-    logger.info(f"Saving latest_bot_message_id: {msg_id} for chat {chat_id}")
-    db.save_latest_bot_message(chat_id, msg_id, event_text)
+    edited = False
+    if old_msg_id:
+        try:
+            await _bot.edit_message(
+                message_id=old_msg_id,
+                text=event_text,
+                attachments=[keyboard] if keyboard else [],
+                parse_mode=ParseMode.HTML,
+            )
+            db.save_latest_bot_message(chat_id, old_msg_id, event_text)
+            edited = True
+        except Exception as e:
+            logger.info(f"edit_message failed, will send new: {e}")
+
+    if not edited:
+        sent_msg = await _bot.send_message(
+            chat_id=chat_id,
+            text=event_text,
+            attachments=[keyboard] if keyboard else None,
+            parse_mode=ParseMode.HTML,
+        )
+        msg_id = sent_msg.message.body.mid if sent_msg and sent_msg.message else ""
+        db.save_latest_bot_message(chat_id, msg_id, event_text)
 
 
 @dp.message_created(Command('add'))
@@ -672,6 +747,25 @@ async def cmd_fix(event: MessageCreated):
                 logger.exception(e)
 
     await event.bot.send_message(chat_id=chat_id, text=text)
+
+    # Mark event message as closed (strikethrough, remove buttons) before
+    # actually closing it in the DB so that create_event_full_text still
+    # has access to event data.
+    payment_url = db.get_event_payment_url(chat_id)
+    closed_text = create_event_full_text(chat_id, payment_url, closed=True).strip() or " "
+    old_msg_id = db.get_latest_bot_message_id(chat_id)
+    if old_msg_id:
+        try:
+            await event.bot.edit_message(
+                message_id=old_msg_id,
+                text=closed_text,
+                attachments=[],
+                parse_mode=ParseMode.HTML,
+            )
+            db.save_latest_bot_message(chat_id, old_msg_id, closed_text)
+        except Exception as e:
+            logger.info(f"Could not edit old message on fix: {e}")
+
     db.fix_event(chat_id)
 
 
@@ -871,15 +965,16 @@ async def cmd_event_copy(event: MessageCreated):
     local_event_id = db.get_event_id_by_chat_id(chat_id)
     db.create_event_link(linked_event_id, local_event_id)
 
-    # Show the event
-    message_text = f"📋 Событие скопировано из {linked_platform}:\n\n" + description
+    # Show the full event (HTML formatted)
+    message_text = create_event_full_text(chat_id, payment_url).strip() or " "
     keyboard = build_event_keyboard()
     sent_msg = await event.bot.send_message(
         chat_id=chat_id,
         text=message_text,
-        attachments=[keyboard] if keyboard else None
+        attachments=[keyboard] if keyboard else None,
+        parse_mode=ParseMode.HTML,
     )
-    msg_id = sent_msg.message.body.mid if sent_msg and sent_msg.message else 0
+    msg_id = sent_msg.message.body.mid if sent_msg and sent_msg.message else ""
     db.save_latest_bot_message(chat_id, msg_id, message_text)
 
 
@@ -936,7 +1031,8 @@ async def handle_callback(event: MessageCallback):
         await event.bot.edit_message(
             message_id=event.message.body.mid,
             text=safe_text,
-            attachments=[keyboard] if keyboard else None
+            attachments=[keyboard] if keyboard else None,
+            parse_mode=ParseMode.HTML,
         )
         db.save_latest_bot_message(chat_id, event.message.body.mid, safe_text)
     except Exception as e:
@@ -945,9 +1041,10 @@ async def handle_callback(event: MessageCallback):
         sent_msg = await event.bot.send_message(
             chat_id=chat_id,
             text=safe_text,
-            attachments=[keyboard] if keyboard else None
+            attachments=[keyboard] if keyboard else None,
+            parse_mode=ParseMode.HTML,
         )
-        msg_id = sent_msg.message.body.mid if sent_msg and sent_msg.message else 0
+        msg_id = sent_msg.message.body.mid if sent_msg and sent_msg.message else ""
         db.save_latest_bot_message(chat_id, msg_id, safe_text)
 
     # Cross-platform sync: update linked Telegram chat
