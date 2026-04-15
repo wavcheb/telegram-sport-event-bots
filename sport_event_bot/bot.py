@@ -130,7 +130,7 @@ def _coerce_to_datetime(val: object) -> Optional[datetime.datetime]:
 
 
 async def sync_to_max(linked_chat_id: int, linked_message_id: str, text: str):
-    """Update message in linked MAX chat."""
+    """Update message in linked MAX chat (HTML formatted)."""
     if not MAX_BOT_TOKEN:
         logger.debug("MAX_BOT_TOKEN not set, skipping MAX sync")
         return False
@@ -140,9 +140,10 @@ async def sync_to_max(linked_chat_id: int, linked_message_id: str, text: str):
         url = f"https://platform-api.max.ru/messages?message_id={linked_message_id}"
         data = json.dumps({
             'text': text,
-        }).encode('utf-8')
+            'format': 'html',
+        }, ensure_ascii=False).encode('utf-8')
         req = urllib.request.Request(url, data=data, method='PUT')
-        req.add_header('Content-Type', 'application/json')
+        req.add_header('Content-Type', 'application/json; charset=utf-8')
         req.add_header('Authorization', MAX_BOT_TOKEN)
 
         def do_request():
@@ -150,7 +151,11 @@ async def sync_to_max(linked_chat_id: int, linked_message_id: str, text: str):
                 with urllib.request.urlopen(req, timeout=10) as resp:
                     return resp.read()
             except urllib.error.HTTPError as e:
-                logger.warning(f"MAX sync HTTP error: {e.code} {e.reason}")
+                try:
+                    body = e.read().decode('utf-8', errors='replace')[:300]
+                except Exception:
+                    body = ''
+                logger.warning(f"MAX sync HTTP error: {e.code} {e.reason} {body}")
                 return None
             except urllib.error.URLError as e:
                 logger.warning(f"MAX sync URL error: {e.reason}")
@@ -168,10 +173,23 @@ async def sync_to_max(linked_chat_id: int, linked_message_id: str, text: str):
     return False
 
 
+def _html_escape(s) -> str:
+    """HTML-escape for MAX (html format)."""
+    if s is None:
+        return ""
+    return (
+        str(s)
+        .replace('&', '&amp;')
+        .replace('<', '&lt;')
+        .replace('>', '&gt;')
+        .replace('"', '&quot;')
+    )
+
+
 def create_max_message_text(chat_id: int, payment_url: str = None) -> str:
-    """Create event text formatted for MAX (plain text with emoji)."""
+    """Create event text formatted for MAX (HTML)."""
     event_title = db.get_event_text(chat_id) or ""
-    text = '🎉 "' + event_title + '" 🎉\n'
+    text = f'🎉 "<b>{_html_escape(event_title)}</b>" 🎉\n'
 
     players_limit = db.get_event_limit(chat_id) or 0
     if players_limit:
@@ -189,22 +207,22 @@ def create_max_message_text(chat_id: int, payment_url: str = None) -> str:
             hours = round(delta.seconds / 3600)
             text += f'⏳ Осталось: {delta.days} дн. и {hours} ч.\n'
 
-    # Links
+    # Links (HTML hyperlinks)
     links = []
     if payment_url:
-        links.append(f'💳 Ссылка для оплаты: {payment_url}')
+        links.append(f'<a href="{_html_escape(payment_url)}">💳 Ссылка для оплаты</a>')
     if PAYMENTS_PAGE_URL:
         try:
             event_id = db.get_event_id_by_chat_id(chat_id)
             primary_event_id = db.get_primary_event_id(event_id)
             payments_link = f'{PAYMENTS_PAGE_URL}?event={primary_event_id}'
-            links.append(f'📊 Текущие платежи: {payments_link}')
+            links.append(f'<a href="{_html_escape(payments_link)}">📊 Текущие платежи</a>')
         except:
             pass
     if links:
         text += '\n' + '\n'.join(links) + '\n'
 
-    text += '\nСписок игроков:\n'
+    text += '\n<b>Список игроков:</b>\n'
 
     # Get all players
     players = db.get_event_users(chat_id) or []
@@ -220,11 +238,11 @@ def create_max_message_text(chat_id: int, payment_url: str = None) -> str:
     # Show local players (Telegram)
     for n, user_id in enumerate(players, start=1):
         if players_limit and n == players_limit + 1:
-            text += '\nРезерв:\n'
+            text += '\n<i>Резерв:</i>\n'
         in_squad = '+' if not players_limit or n <= players_limit else '  '
-        printable_name = db.compose_full_name(user_id)
+        printable_name = _html_escape(db.compose_full_name(user_id))
         paid = db.get_payment_status(chat_id, user_id)
-        payment_mark = ' [оплачено]' if paid else ''
+        payment_mark = ' 💰' if paid else ''
         platform_mark = ' [telegram]'
         text += f'{in_squad} {n}. {printable_name}{payment_mark}{platform_mark}\n'
 
@@ -234,10 +252,22 @@ def create_max_message_text(chat_id: int, payment_url: str = None) -> str:
         for i, (user_id, platform, name) in enumerate(linked_players):
             n = start_n + i
             if players_limit and n == players_limit + 1:
-                text += '\nРезерв:\n'
+                text += '\n<i>Резерв:</i>\n'
             in_squad = '+' if not players_limit or n <= players_limit else '  '
-            platform_mark = f' [{platform}]' if platform != 'telegram' else ' [telegram]'
-            text += f'{in_squad} {n}. {name}{platform_mark}\n'
+            safe_name = _html_escape(name)
+            platform_mark = f' [{_html_escape(platform)}]' if platform != 'telegram' else ' [telegram]'
+            text += f'{in_squad} {n}. {safe_name}{platform_mark}\n'
+
+    # Cancelled applications with strikethrough
+    canceled_players = db.get_event_revoked_users(chat_id) or []
+    if canceled_players:
+        text += '\n<i>Отказавшиеся:</i>\n'
+        for canceled_user_id in canceled_players:
+            cancel_datetime = db.get_user_cancellation_datetime(chat_id, canceled_user_id)
+            cd = _coerce_to_datetime(cancel_datetime)
+            cd_txt = cd.strftime('%Y-%m-%d %H:%M') if cd else str(cancel_datetime)[:16]
+            printable_name = _html_escape(db.compose_full_name(canceled_user_id))
+            text += f'  <s>{printable_name} - {_html_escape(cd_txt)}</s>\n'
 
     return text
 
@@ -413,11 +443,33 @@ async def remove_all_chat_events(update, context):
     this_chat_id = update.message.chat_id
     new_chat_id_memoization(this_chat_id, update.message.from_user.language_code)
     latest_bot_message_id = db.get_latest_bot_message_id(this_chat_id)
-    if latest_bot_message_id:
+    if latest_bot_message_id and db.get_event_text(this_chat_id):
+        # Render closed-state text (strikethrough) before actually closing the event
+        lang = update.message.from_user.language_code or 'ru'
+        translate = TRANSLATIONS.get(lang, lambda t: t)
         try:
-            await context.bot.edit_message_reply_markup(chat_id=this_chat_id, message_id=latest_bot_message_id)
+            payment_url = db.get_event_payment_url(this_chat_id)
+            telegraph_url = db.get_event_telegraph_url(this_chat_id)
+            closed_text = create_event_full_text(
+                this_chat_id, translate, payment_url, telegraph_url, closed=True
+            ).strip() or " "
+            await context.bot.edit_message_text(
+                chat_id=this_chat_id,
+                message_id=latest_bot_message_id,
+                text=closed_text,
+                parse_mode=ParseMode.HTML,
+                disable_web_page_preview=True,
+            )
+            db.save_latest_bot_message(this_chat_id, latest_bot_message_id, closed_text)
         except Exception as e:
-            logger.warning(f"Failed to clear reply markup: {e}")
+            logger.warning(f"Failed to mark event as closed: {e}")
+            # Fallback: at least clear the inline keyboard
+            try:
+                await context.bot.edit_message_reply_markup(
+                    chat_id=this_chat_id, message_id=latest_bot_message_id
+                )
+            except Exception as e2:
+                logger.warning(f"Failed to clear reply markup: {e2}")
     db.close_all_open_events_for_chat(this_chat_id)
 
 @logger.catch
@@ -501,7 +553,8 @@ async def set_players_limit(update, context):
 
 @logger.catch
 def create_event_full_text(this_chat_id: int, translate: Callable[[str], str],
-                           payment_url: str = None, telegraph_url: str = None):
+                           payment_url: str = None, telegraph_url: str = None,
+                           closed: bool = False):
     def player_name_with_cards(games_registered, penalties, full_name, translator):
         printable_name = full_name
         games_played = games_registered - penalties
@@ -516,8 +569,14 @@ def create_event_full_text(this_chat_id: int, translate: Callable[[str], str],
             return f'{printable_name}🟨🟨🟨 (Played {games_played} from {games_registered})'
         return printable_name
 
+    def _wrap_closed(s: str) -> str:
+        return f'<s>{s}</s>' if closed else s
+
     event_title = db.get_event_text(this_chat_id) or ""
-    text = '🎉"<b>' + event_title + '</b>"🎉\n'
+    if closed:
+        text = f'🎉"<s><b>{event_title}</b></s>"🎉  🔒 <i>{translate("Event closed")}</i>\n'
+    else:
+        text = '🎉"<b>' + event_title + '</b>"🎉\n'
     players_limit = db.get_event_limit(this_chat_id) or 0
     if players_limit:
         text += translate('Players limit') + f': {players_limit}\n'
@@ -571,7 +630,8 @@ def create_event_full_text(this_chat_id: int, translate: Callable[[str], str],
         games_registered, penalties = db.get_chat_user_rp(this_chat_id, user_id)
         paid = db.get_payment_status(this_chat_id, user_id)
         payment_emoji = '💰' if paid else ''
-        text_players += in_squad + f'{n}. {player_name_with_cards(games_registered, penalties, printable_name, translate)} {payment_emoji}\n'
+        name_with_cards = player_name_with_cards(games_registered, penalties, printable_name, translate)
+        text_players += in_squad + f'{n}. {_wrap_closed(name_with_cards + " " + payment_emoji)}\n'
 
     # Show linked players from other platform
     if linked_players:
@@ -582,7 +642,7 @@ def create_event_full_text(this_chat_id: int, translate: Callable[[str], str],
                 text_players += '\t\t\n' + translate('Reserve') + ':\n'
             in_squad = '➕' if not players_limit or n <= players_limit else '      '
             platform_mark = f' [{platform}]'
-            text_players += in_squad + f'{n}. {name}{platform_mark}\n'
+            text_players += in_squad + f'{n}. {_wrap_closed(name + platform_mark)}\n'
 
     text += '\n' + text_players
     total_players = len(players) + len(linked_players)
@@ -763,10 +823,29 @@ async def fix_squad(update, context):
     text += "</code>"
     latest_bot_message_id = db.get_latest_bot_message_id(this_chat_id)
     if latest_bot_message_id:
+        # Mark existing event message as closed (strikethrough) before closing in DB
         try:
-            await context.bot.edit_message_reply_markup(chat_id=this_chat_id, message_id=latest_bot_message_id)
+            payment_url = db.get_event_payment_url(this_chat_id)
+            telegraph_url = db.get_event_telegraph_url(this_chat_id)
+            closed_text = create_event_full_text(
+                this_chat_id, translate, payment_url, telegraph_url, closed=True
+            ).strip() or " "
+            await context.bot.edit_message_text(
+                chat_id=this_chat_id,
+                message_id=latest_bot_message_id,
+                text=closed_text,
+                parse_mode=ParseMode.HTML,
+                disable_web_page_preview=True,
+            )
+            db.save_latest_bot_message(this_chat_id, latest_bot_message_id, closed_text)
         except Exception as e:
-            logger.warning(f"Failed to clear reply markup: {e}")
+            logger.warning(f"Failed to mark event as closed on /fix: {e}")
+            try:
+                await context.bot.edit_message_reply_markup(
+                    chat_id=this_chat_id, message_id=latest_bot_message_id
+                )
+            except Exception as e2:
+                logger.warning(f"Failed to clear reply markup: {e2}")
     await context.bot.send_message(this_chat_id, text, parse_mode=ParseMode.HTML, disable_web_page_preview=True)
     db.fix_event(this_chat_id)
 

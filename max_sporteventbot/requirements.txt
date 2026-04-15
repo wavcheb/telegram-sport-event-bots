@@ -9,3 +9,6 @@ maxapi>=0.1.0
 
 # Database
 mysql-connector-python>=8.0.33
+
+# HTTP client for cross-platform sync (SOCKS proxy support via PySocks)
+requests[socks]>=2.28.0
