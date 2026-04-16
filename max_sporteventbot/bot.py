@@ -1125,16 +1125,42 @@ async def main():
     # Initialize database tables
     db.init_database()
 
-    logger.info("MAX Sport Event Bot is starting...")
+    # Webhook configuration (set MAX_WEBHOOK_URL to enable webhook mode)
+    webhook_url = os.getenv('MAX_WEBHOOK_URL', '').strip()
+    webhook_secret = os.getenv('MAX_WEBHOOK_SECRET', '').strip() or None
+    webhook_host = os.getenv('MAX_WEBHOOK_HOST', '127.0.0.1').strip()
+    webhook_port = int(os.getenv('MAX_WEBHOOK_PORT', '8180'))
+    webhook_path = os.getenv('MAX_WEBHOOK_PATH', '/').strip()
 
-    # Delete any existing webhook before polling
+    # Clean up any old webhook subscriptions
     try:
         await bot.delete_webhook()
     except Exception as e:
-        logger.warning(f"Could not delete webhook: {e}")
+        logger.warning(f"Could not delete old webhooks: {e}")
 
-    # Start polling
-    await dp.start_polling(bot)
+    if webhook_url:
+        # === Production: Webhook mode ===
+        logger.info(f"MAX Sport Event Bot starting in WEBHOOK mode")
+        logger.info(f"  Webhook URL: {webhook_url}")
+        logger.info(f"  Local listener: {webhook_host}:{webhook_port}{webhook_path}")
+
+        # Register webhook with MAX API
+        await bot.subscribe_webhook(url=webhook_url, secret=webhook_secret)
+        logger.info("Webhook subscription registered successfully")
+
+        # Start local aiohttp server to receive updates
+        await dp.handle_webhook(
+            bot,
+            host=webhook_host,
+            port=webhook_port,
+            path=webhook_path,
+            secret=webhook_secret,
+        )
+    else:
+        # === Development: Long polling mode ===
+        logger.info("MAX Sport Event Bot starting in POLLING mode (dev only)")
+        logger.warning("Long polling is for development only! Set MAX_WEBHOOK_URL for production.")
+        await dp.start_polling(bot)
 
 
 if __name__ == '__main__':
