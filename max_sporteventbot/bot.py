@@ -294,8 +294,12 @@ def build_event_keyboard():
     )
 
 
-def create_event_full_text(this_chat_id: int, payment_url: str = None, closed: bool = False) -> str:
-    """Create full event text with players list (HTML, Russian)."""
+def create_event_full_text(this_chat_id: int, payment_url: str = None, closed: str = None) -> str:
+    """Create full event text with players list (HTML, Russian).
+
+    Args:
+        closed: None for active event, 'removed' for deleted, 'finished' for completed
+    """
     def player_name_with_cards(games_registered, penalties, full_name):
         printable_name = full_name
         games_played = games_registered - penalties
@@ -308,8 +312,12 @@ def create_event_full_text(this_chat_id: int, payment_url: str = None, closed: b
 
     event_title = db.get_event_text(this_chat_id) or ""
     title_html = _escape_html(event_title)
-    if closed:
-        text = f'🎉 "<s><b>{title_html}</b></s>" 🎉  🔒 <i>Событие закрыто</i>\n'
+    if closed == 'removed':
+        text = f'🎉 "<s><b>{title_html}</b></s>" 🎉  ❌ <i>Событие удалено</i>\n'
+    elif closed == 'finished':
+        text = f'🎉 "<s><b>{title_html}</b></s>" 🎉  ✅ <i>Событие состоялось</i>\n'
+    elif closed:  # backward compat: any truthy value = removed
+        text = f'🎉 "<s><b>{title_html}</b></s>" 🎉  ❌ <i>Событие удалено</i>\n'
     else:
         text = f'🎉 "<b>{title_html}</b>" 🎉\n'
     players_limit = db.get_event_limit(this_chat_id) or 0
@@ -541,15 +549,20 @@ async def cmd_event_add(event: MessageCreated):
     message_text = create_event_full_text(chat_id, payment_url).strip() or " "
 
     keyboard = build_event_keyboard()
-    sent_msg = await event.bot.send_message(
-        chat_id=chat_id,
-        text=message_text,
-        attachments=[keyboard] if keyboard else None,
-        parse_mode=ParseMode.HTML,
-    )
-
-    msg_id = sent_msg.message.body.mid if sent_msg and sent_msg.message else ""
-    db.save_latest_bot_message(chat_id, msg_id, message_text)
+    logger.info(f"cmd_event_add: sending message to chat {chat_id}")
+    try:
+        sent_msg = await event.bot.send_message(
+            chat_id=chat_id,
+            text=message_text,
+            attachments=[keyboard] if keyboard else None,
+            format=ParseMode.HTML,
+            disable_link_preview=True,
+        )
+        msg_id = sent_msg.message.body.mid if sent_msg and sent_msg.message else ""
+        logger.info(f"cmd_event_add: message sent successfully, mid={msg_id}")
+        db.save_latest_bot_message(chat_id, msg_id, message_text)
+    except Exception as e:
+        logger.error(f"cmd_event_add: FAILED to send message: {e}")
 
 
 @dp.message_created(Command('event_remove'))
@@ -566,7 +579,7 @@ async def cmd_event_remove(event: MessageCreated):
     # Build fresh closed-state text (regenerated, not fetched from DB) to
     # avoid any encoding glitches with stored text.
     payment_url = db.get_event_payment_url(chat_id)
-    closed_text = create_event_full_text(chat_id, payment_url, closed=True).strip() or " "
+    closed_text = create_event_full_text(chat_id, payment_url, closed='removed').strip() or " "
 
     old_msg_id = db.get_latest_bot_message_id(chat_id)
     if old_msg_id:
@@ -575,7 +588,7 @@ async def cmd_event_remove(event: MessageCreated):
                 message_id=old_msg_id,
                 text=closed_text,
                 attachments=[],
-                parse_mode=ParseMode.HTML,
+                format=ParseMode.HTML,
             )
             db.save_latest_bot_message(chat_id, old_msg_id, closed_text)
         except Exception as e:
@@ -619,9 +632,9 @@ async def cmd_info(event: MessageCreated):
 async def show_info_impl(event: MessageCreated, bot=None):
     """Show/refresh event info.
 
-    Strategy: edit the existing bot message in place if present.
-    This keeps the event post at the top of the chat and avoids relying
-    on button-removal (which is buggy in MAX desktop).
+    Strategy: remove buttons from old message (if exists), then send a NEW
+    message with current event info and buttons. This ensures the event
+    announcement is always visible at the bottom of the chat.
     """
     chat_id = event.chat.chat_id
     new_chat_id_memoization(chat_id)
@@ -630,36 +643,36 @@ async def show_info_impl(event: MessageCreated, bot=None):
         await event.message.answer('Нет активных событий')
         return
 
+    _bot = bot or event.bot
+
+    # Remove buttons from old message (leave text intact)
+    old_msg_id = db.get_latest_bot_message_id(chat_id)
+    old_msg_text = db.get_latest_bot_message_text(chat_id)
+    if old_msg_id and old_msg_text:
+        try:
+            await _bot.edit_message(
+                message_id=old_msg_id,
+                text=old_msg_text,
+                attachments=[],
+            )
+        except Exception as e:
+            logger.info(f"Could not remove buttons from old message: {e}")
+
+    # Send NEW message with current event info
     payment_url = db.get_event_payment_url(chat_id)
     event_text = create_event_full_text(chat_id, payment_url).strip() or " "
     keyboard = build_event_keyboard()
 
-    _bot = bot or event.bot
-    old_msg_id = db.get_latest_bot_message_id(chat_id)
-
-    edited = False
-    if old_msg_id:
-        try:
-            await _bot.edit_message(
-                message_id=old_msg_id,
-                text=event_text,
-                attachments=[keyboard] if keyboard else [],
-                parse_mode=ParseMode.HTML,
-            )
-            db.save_latest_bot_message(chat_id, old_msg_id, event_text)
-            edited = True
-        except Exception as e:
-            logger.info(f"edit_message failed, will send new: {e}")
-
-    if not edited:
-        sent_msg = await _bot.send_message(
-            chat_id=chat_id,
-            text=event_text,
-            attachments=[keyboard] if keyboard else None,
-            parse_mode=ParseMode.HTML,
-        )
-        msg_id = sent_msg.message.body.mid if sent_msg and sent_msg.message else ""
-        db.save_latest_bot_message(chat_id, msg_id, event_text)
+    sent_msg = await _bot.send_message(
+        chat_id=chat_id,
+        text=event_text,
+        attachments=[keyboard] if keyboard else None,
+        format=ParseMode.HTML,
+        disable_link_preview=True,
+    )
+    msg_id = sent_msg.message.body.mid if sent_msg and sent_msg.message else ""
+    logger.info(f"show_info_impl: sent new message, mid={msg_id}")
+    db.save_latest_bot_message(chat_id, msg_id, event_text)
 
 
 @dp.message_created(Command('add'))
@@ -752,7 +765,7 @@ async def cmd_fix(event: MessageCreated):
     # actually closing it in the DB so that create_event_full_text still
     # has access to event data.
     payment_url = db.get_event_payment_url(chat_id)
-    closed_text = create_event_full_text(chat_id, payment_url, closed=True).strip() or " "
+    closed_text = create_event_full_text(chat_id, payment_url, closed='finished').strip() or " "
     old_msg_id = db.get_latest_bot_message_id(chat_id)
     if old_msg_id:
         try:
@@ -760,7 +773,7 @@ async def cmd_fix(event: MessageCreated):
                 message_id=old_msg_id,
                 text=closed_text,
                 attachments=[],
-                parse_mode=ParseMode.HTML,
+                format=ParseMode.HTML,
             )
             db.save_latest_bot_message(chat_id, old_msg_id, closed_text)
         except Exception as e:
@@ -972,7 +985,8 @@ async def cmd_event_copy(event: MessageCreated):
         chat_id=chat_id,
         text=message_text,
         attachments=[keyboard] if keyboard else None,
-        parse_mode=ParseMode.HTML,
+        format=ParseMode.HTML,
+        disable_link_preview=True,
     )
     msg_id = sent_msg.message.body.mid if sent_msg and sent_msg.message else ""
     db.save_latest_bot_message(chat_id, msg_id, message_text)
@@ -1032,7 +1046,7 @@ async def handle_callback(event: MessageCallback):
             message_id=event.message.body.mid,
             text=safe_text,
             attachments=[keyboard] if keyboard else None,
-            parse_mode=ParseMode.HTML,
+            format=ParseMode.HTML,
         )
         db.save_latest_bot_message(chat_id, event.message.body.mid, safe_text)
     except Exception as e:
@@ -1042,7 +1056,8 @@ async def handle_callback(event: MessageCallback):
             chat_id=chat_id,
             text=safe_text,
             attachments=[keyboard] if keyboard else None,
-            parse_mode=ParseMode.HTML,
+            format=ParseMode.HTML,
+            disable_link_preview=True,
         )
         msg_id = sent_msg.message.body.mid if sent_msg and sent_msg.message else ""
         db.save_latest_bot_message(chat_id, msg_id, safe_text)
