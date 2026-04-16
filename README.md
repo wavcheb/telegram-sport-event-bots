@@ -32,7 +32,7 @@ Use [existing bot](https://t.me/nashtournamentbot) @nashtournamentbot or make ow
 **[📖 Full Documentation](tournament_bot/README.md)**
 
 ### 📱 MAX Sport Event Bot
-MAX Messenger bot for organizing sports events. Can link with Telegram Sport Event Bot for cross-platform participant management.
+MAX Messenger bot for organizing sports events. Can link with Telegram Sport Event Bot for cross-platform participant management. Use existing bot [existing bot](https://max.ru/id2130146188_1_bot) @id2130146188_1_bot or make selfhosted bot.
 
 **Key Features:**
 - Event management with participant registration
