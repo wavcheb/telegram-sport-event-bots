@@ -1104,10 +1104,17 @@ async def main():
         print("TELEGRAM_BOT_TOKEN is empty")
         sys.exit(1)
 
-    # Configure proxy if set (for regions where Telegram is blocked)
+    # Configure Telegram API access for blocked regions:
+    # Option 1: CF Worker proxy (preferred) — set TG_API_URL to worker URL
+    # Option 2: SOCKS/HTTP proxy — set TELEGRAM_PROXY
     proxy_url = os.getenv('TELEGRAM_PROXY')
+    tg_api_url = os.getenv('TG_API_URL', '').strip()
     builder = Application.builder().token(api_token)
-    if proxy_url:
+    if tg_api_url:
+        base = tg_api_url.rstrip('/')
+        builder = builder.base_url(f'{base}/bot').base_file_url(f'{base}/file/bot')
+        logger.info(f"Using Telegram API proxy: {base}")
+    elif proxy_url:
         logger.info(f"Using proxy: {proxy_url.split('@')[-1] if '@' in proxy_url else proxy_url}")
         builder = builder.proxy(proxy_url).get_updates_proxy(proxy_url)
     application = builder.build()
@@ -1141,30 +1148,7 @@ async def main():
     await application.initialize()
     await application.start()
 
-    # Webhook or polling mode
-    webhook_url = os.getenv('TG_WEBHOOK_URL', '').strip()
-    if webhook_url:
-        webhook_secret = os.getenv('TG_WEBHOOK_SECRET', '').strip()
-        webhook_host = os.getenv('TG_WEBHOOK_HOST', '127.0.0.1').strip()
-        webhook_port = int(os.getenv('TG_WEBHOOK_PORT', '8181').strip())
-        webhook_path = os.getenv('TG_WEBHOOK_PATH', '/tg-webhook').strip()
-
-        await application.bot.set_webhook(
-            url=webhook_url,
-            secret_token=webhook_secret or None,
-        )
-        logger.info(f"Webhook set: {webhook_url}")
-
-        await application.updater.start_webhook(
-            listen=webhook_host,
-            port=webhook_port,
-            url_path=webhook_path.lstrip('/'),
-            secret_token=webhook_secret or None,
-        )
-        logger.info(f"Webhook listener on {webhook_host}:{webhook_port}{webhook_path}")
-    else:
-        await application.updater.start_polling()
-        logger.info("Polling mode started")
+    await application.updater.start_polling()
 
     logger.info("Bot is running...")
 

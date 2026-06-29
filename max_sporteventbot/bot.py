@@ -70,6 +70,11 @@ TG_BOT_TOKEN = os.getenv('TG_BOT_TOKEN', '').strip()
 # Supported: socks5://user:pass@host:port, http://host:port, https://host:port
 TELEGRAM_PROXY = os.getenv('TELEGRAM_PROXY', '').strip()
 
+# CF Worker proxy URL for Telegram API (alternative to SOCKS proxy)
+# Example: https://tg-api-proxy.your-domain.workers.dev
+TG_API_URL = os.getenv('TG_API_URL', '').strip()
+TG_API_BASE = TG_API_URL.rstrip('/') if TG_API_URL else 'https://api.telegram.org'
+
 
 def _coerce_to_datetime(val: object) -> Optional[datetime.datetime]:
     """Accept datetime or str; return datetime or None."""
@@ -158,7 +163,7 @@ async def sync_to_telegram(linked_chat_id: int, linked_message_id: int, text: st
         logger.debug("TG_BOT_TOKEN not set, skipping Telegram sync")
         return False
 
-    url = f"https://api.telegram.org/bot{TG_BOT_TOKEN}/editMessageText"
+    url = f"{TG_API_BASE}/bot{TG_BOT_TOKEN}/editMessageText"
     data = {
         'chat_id': linked_chat_id,
         'message_id': linked_message_id,
