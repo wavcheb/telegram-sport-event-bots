@@ -1140,7 +1140,32 @@ async def main():
     logger.info("Telegram Futsal Bot is starting...")
     await application.initialize()
     await application.start()
-    await application.updater.start_polling()
+
+    # Webhook or polling mode
+    webhook_url = os.getenv('TG_WEBHOOK_URL', '').strip()
+    if webhook_url:
+        webhook_secret = os.getenv('TG_WEBHOOK_SECRET', '').strip()
+        webhook_host = os.getenv('TG_WEBHOOK_HOST', '127.0.0.1').strip()
+        webhook_port = int(os.getenv('TG_WEBHOOK_PORT', '8181').strip())
+        webhook_path = os.getenv('TG_WEBHOOK_PATH', '/tg-webhook').strip()
+
+        await application.bot.set_webhook(
+            url=webhook_url,
+            secret_token=webhook_secret or None,
+        )
+        logger.info(f"Webhook set: {webhook_url}")
+
+        await application.updater.start_webhook(
+            listen=webhook_host,
+            port=webhook_port,
+            url_path=webhook_path.lstrip('/'),
+            secret_token=webhook_secret or None,
+        )
+        logger.info(f"Webhook listener on {webhook_host}:{webhook_port}{webhook_path}")
+    else:
+        await application.updater.start_polling()
+        logger.info("Polling mode started")
+
     logger.info("Bot is running...")
 
     # Создаём событие для ожидания

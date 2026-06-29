@@ -994,34 +994,37 @@ async def cmd_event_copy(event: MessageCreated):
 
 @dp.message_callback()
 async def handle_callback(event: MessageCallback):
-    """Handle inline button callbacks."""
-    # Get chat_id from message recipient
+    """Handle inline button callbacks.
+
+    Uses event.edit() (maxapi 1.2+) which:
+    - edits the message AND sends a callback answer in one call
+    - notification= shows a toast popup instead of flooding the chat
+    - attachments=None preserves existing keyboard automatically
+    """
     chat_id = event.message.recipient.chat_id
     user = event.callback.user
     callback_data = event.callback.payload
 
     logger.info(f"Callback: chat_id={chat_id}, user={user.user_id}, action={callback_data}")
 
+    notification = None  # toast popup text
+
     try:
         db.add_or_update_user(user.user_id, user.first_name or '', user.last_name or '', user.username or '')
+        full_name = db.compose_full_name(user.user_id)
 
         if callback_data == "ADD":
             db.apply_for_participation_in_the_event(chat_id, user.user_id)
+            notification = f'{full_name} записался'
         elif callback_data == "REMOVE":
             db.revoke_application_for_the_event(chat_id, user.user_id)
+            notification = f'{full_name} отписался'
         elif callback_data == "ADD_LEGIONEER":
             db.apply_for_legioneer(chat_id, user.user_id)
-            full_name = db.compose_full_name(user.user_id)
-            await event.bot.send_message(chat_id=chat_id, text=f'Гость добавлен пользователем {full_name}')
+            notification = f'Гость добавлен ({full_name})'
         elif callback_data == "REMOVE_LEGIONEER":
             db.revoke_for_legioneer(chat_id)
-            try:
-                full_name = db.compose_full_name(user.user_id)
-                event_id = db.get_event_id_by_chat_id(chat_id)
-                if event_id and db.get_legioneer_user(event_id) > 31:
-                    await event.bot.send_message(chat_id=chat_id, text=f'Гость удалён пользователем {full_name}')
-            except:
-                pass
+            notification = f'Гость удалён ({full_name})'
         elif callback_data == "PAY":
             result = db.process_payment(chat_id, user.user_id)
             msg_map = {
@@ -1030,28 +1033,32 @@ async def handle_callback(event: MessageCallback):
                 'Payment for friend confirmed!': 'Оплата за друга подтверждена!',
                 'Payment already confirmed.': 'Оплата уже подтверждена.',
             }
-            await event.bot.send_message(chat_id=chat_id, text=msg_map.get(result['message'], result['message']))
+            notification = msg_map.get(result['message'], result['message'])
     except Exception as e:
         logger.exception(f"Error processing callback action: {e}")
+        notification = 'Ошибка обработки действия'
 
-    # Update message with new player list
+    # Update message with new player list via event.edit()
+    # attachments=None preserves existing inline keyboard
     payment_url = db.get_event_payment_url(chat_id)
     message_text = create_event_full_text(chat_id, payment_url)
     safe_text = (message_text or "").strip() or " "
 
-    keyboard = build_event_keyboard()
-
     try:
-        await event.bot.edit_message(
-            message_id=event.message.body.mid,
+        await event.edit(
             text=safe_text,
-            attachments=[keyboard] if keyboard else None,
             format=ParseMode.HTML,
+            notification=notification,
         )
         db.save_latest_bot_message(chat_id, event.message.body.mid, safe_text)
     except Exception as e:
-        logger.warning(f"Failed to edit message: {e}")
-        # Send new message if edit fails
+        logger.warning(f"event.edit failed: {e}, sending new message")
+        # Fallback: ack callback + send new message
+        try:
+            await event.ack(notification=notification)
+        except Exception:
+            pass
+        keyboard = build_event_keyboard()
         sent_msg = await event.bot.send_message(
             chat_id=chat_id,
             text=safe_text,
