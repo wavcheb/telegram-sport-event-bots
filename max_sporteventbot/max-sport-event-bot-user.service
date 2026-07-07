@@ -1,0 +1,15 @@
+[Unit]
+Description=MAX Sport Event Bot (User Service)
+After=network.target
+
+[Service]
+Type=simple
+WorkingDirectory=/usr/local/maxbot/sporteventbot
+ExecStart=/usr/local/maxbot/sporteventbot/run.sh
+Restart=always
+RestartSec=10
+StandardOutput=append:/usr/local/maxbot/sporteventbot/logs/systemd.log
+StandardError=append:/usr/local/maxbot/sporteventbot/logs/systemd.log
+
+[Install]
+WantedBy=default.target

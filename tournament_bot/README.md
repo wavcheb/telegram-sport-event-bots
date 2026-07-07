@@ -303,6 +303,19 @@ python3 -m tournament_bot.db_tournament
 - Check you clicked the correct match button
 - Try format: `3:1` (with colon)
 
+### Bot doesn't see answers in group chats
+In group chats Telegram bots (with privacy mode enabled, the default) only
+receive commands, @mentions, and **replies to the bot's own messages**.
+The bot sends its questions with ForceReply, so your Telegram client should
+open reply mode automatically — just type the answer without dismissing it.
+
+If you dismissed the reply prompt, reply manually to the bot's question
+message (swipe left / right-click → Reply).
+
+To make the bot see **all** messages in a group, disable privacy mode:
+BotFather → `/setprivacy` → select the bot → `Disable`, then remove and
+re-add the bot to the group.
+
 ## 📝 Limitations
 
 - One active tournament per chat at a time

@@ -1,0 +1,18 @@
+[Unit]
+Description=MAX Sport Event Bot
+After=network.target mysql.service
+Wants=mysql.service
+
+[Service]
+Type=simple
+User=YOUR_USERNAME
+Group=YOUR_USERNAME
+WorkingDirectory=/usr/local/maxbot/sporteventbot
+ExecStart=/usr/local/maxbot/sporteventbot/run.sh
+Restart=always
+RestartSec=10
+StandardOutput=append:/usr/local/maxbot/sporteventbot/logs/systemd.log
+StandardError=append:/usr/local/maxbot/sporteventbot/logs/systemd.log
+
+[Install]
+WantedBy=multi-user.target

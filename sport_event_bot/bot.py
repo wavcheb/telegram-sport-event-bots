@@ -129,18 +129,34 @@ def _coerce_to_datetime(val: object) -> Optional[datetime.datetime]:
     return None
 
 
+# MAX inline keyboard JSON for cross-platform sync
+# Matches the buttons defined in max_sporteventbot build_event_keyboard()
+MAX_EVENT_KEYBOARD_ATTACHMENT = {
+    'type': 'inline_keyboard',
+    'payload': {
+        'buttons': [
+            [{'type': 'callback', 'text': '+ Записаться', 'payload': 'ADD'}],
+            [{'type': 'callback', 'text': '- Отписаться', 'payload': 'REMOVE'}],
+            [{'type': 'callback', 'text': '+ Добавить друга/легионера', 'payload': 'ADD_LEGIONEER'}],
+            [{'type': 'callback', 'text': '- Убрать последнего легионера', 'payload': 'REMOVE_LEGIONEER'}],
+            [{'type': 'callback', 'text': 'Оплата подтверждена', 'payload': 'PAY'}],
+        ]
+    }
+}
+
+
 async def sync_to_max(linked_chat_id: int, linked_message_id: str, text: str):
-    """Update message in linked MAX chat (HTML formatted)."""
+    """Update message in linked MAX chat (HTML formatted, preserving buttons)."""
     if not MAX_BOT_TOKEN:
         logger.debug("MAX_BOT_TOKEN not set, skipping MAX sync")
         return False
 
     try:
-        # MAX API migrated to platform-api.max.ru with Authorization header
         url = f"https://platform-api.max.ru/messages?message_id={linked_message_id}"
         data = json.dumps({
             'text': text,
             'format': 'html',
+            'attachments': [MAX_EVENT_KEYBOARD_ATTACHMENT],
         }, ensure_ascii=False).encode('utf-8')
         req = urllib.request.Request(url, data=data, method='PUT')
         req.add_header('Content-Type', 'application/json; charset=utf-8')
@@ -1088,10 +1104,17 @@ async def main():
         print("TELEGRAM_BOT_TOKEN is empty")
         sys.exit(1)
 
-    # Configure proxy if set (for regions where Telegram is blocked)
+    # Configure Telegram API access for blocked regions:
+    # Option 1: CF Worker proxy (preferred) — set TG_API_URL to worker URL
+    # Option 2: SOCKS/HTTP proxy — set TELEGRAM_PROXY
     proxy_url = os.getenv('TELEGRAM_PROXY')
+    tg_api_url = os.getenv('TG_API_URL', '').strip()
     builder = Application.builder().token(api_token)
-    if proxy_url:
+    if tg_api_url:
+        base = tg_api_url.rstrip('/')
+        builder = builder.base_url(f'{base}/bot').base_file_url(f'{base}/file/bot')
+        logger.info(f"Using Telegram API proxy: {base}")
+    elif proxy_url:
         logger.info(f"Using proxy: {proxy_url.split('@')[-1] if '@' in proxy_url else proxy_url}")
         builder = builder.proxy(proxy_url).get_updates_proxy(proxy_url)
     application = builder.build()
@@ -1124,7 +1147,9 @@ async def main():
     logger.info("Telegram Futsal Bot is starting...")
     await application.initialize()
     await application.start()
+
     await application.updater.start_polling()
+
     logger.info("Bot is running...")
 
     # Создаём событие для ожидания

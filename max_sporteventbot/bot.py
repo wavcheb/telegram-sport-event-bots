@@ -70,6 +70,11 @@ TG_BOT_TOKEN = os.getenv('TG_BOT_TOKEN', '').strip()
 # Supported: socks5://user:pass@host:port, http://host:port, https://host:port
 TELEGRAM_PROXY = os.getenv('TELEGRAM_PROXY', '').strip()
 
+# CF Worker proxy URL for Telegram API (alternative to SOCKS proxy)
+# Example: https://tg-api-proxy.your-domain.workers.dev
+TG_API_URL = os.getenv('TG_API_URL', '').strip()
+TG_API_BASE = TG_API_URL.rstrip('/') if TG_API_URL else 'https://api.telegram.org'
+
 
 def _coerce_to_datetime(val: object) -> Optional[datetime.datetime]:
     """Accept datetime or str; return datetime or None."""
@@ -158,7 +163,7 @@ async def sync_to_telegram(linked_chat_id: int, linked_message_id: int, text: st
         logger.debug("TG_BOT_TOKEN not set, skipping Telegram sync")
         return False
 
-    url = f"https://api.telegram.org/bot{TG_BOT_TOKEN}/editMessageText"
+    url = f"{TG_API_BASE}/bot{TG_BOT_TOKEN}/editMessageText"
     data = {
         'chat_id': linked_chat_id,
         'message_id': linked_message_id,
@@ -994,34 +999,37 @@ async def cmd_event_copy(event: MessageCreated):
 
 @dp.message_callback()
 async def handle_callback(event: MessageCallback):
-    """Handle inline button callbacks."""
-    # Get chat_id from message recipient
+    """Handle inline button callbacks.
+
+    Uses event.edit() (maxapi 1.2+) which:
+    - edits the message AND sends a callback answer in one call
+    - notification= shows a toast popup instead of flooding the chat
+    - attachments=None preserves existing keyboard automatically
+    """
     chat_id = event.message.recipient.chat_id
     user = event.callback.user
     callback_data = event.callback.payload
 
     logger.info(f"Callback: chat_id={chat_id}, user={user.user_id}, action={callback_data}")
 
+    notification = None  # toast popup text
+
     try:
         db.add_or_update_user(user.user_id, user.first_name or '', user.last_name or '', user.username or '')
+        full_name = db.compose_full_name(user.user_id)
 
         if callback_data == "ADD":
             db.apply_for_participation_in_the_event(chat_id, user.user_id)
+            notification = f'{full_name} записался'
         elif callback_data == "REMOVE":
             db.revoke_application_for_the_event(chat_id, user.user_id)
+            notification = f'{full_name} отписался'
         elif callback_data == "ADD_LEGIONEER":
             db.apply_for_legioneer(chat_id, user.user_id)
-            full_name = db.compose_full_name(user.user_id)
-            await event.bot.send_message(chat_id=chat_id, text=f'Гость добавлен пользователем {full_name}')
+            notification = f'Гость добавлен ({full_name})'
         elif callback_data == "REMOVE_LEGIONEER":
             db.revoke_for_legioneer(chat_id)
-            try:
-                full_name = db.compose_full_name(user.user_id)
-                event_id = db.get_event_id_by_chat_id(chat_id)
-                if event_id and db.get_legioneer_user(event_id) > 31:
-                    await event.bot.send_message(chat_id=chat_id, text=f'Гость удалён пользователем {full_name}')
-            except:
-                pass
+            notification = f'Гость удалён ({full_name})'
         elif callback_data == "PAY":
             result = db.process_payment(chat_id, user.user_id)
             msg_map = {
@@ -1030,28 +1038,32 @@ async def handle_callback(event: MessageCallback):
                 'Payment for friend confirmed!': 'Оплата за друга подтверждена!',
                 'Payment already confirmed.': 'Оплата уже подтверждена.',
             }
-            await event.bot.send_message(chat_id=chat_id, text=msg_map.get(result['message'], result['message']))
+            notification = msg_map.get(result['message'], result['message'])
     except Exception as e:
         logger.exception(f"Error processing callback action: {e}")
+        notification = 'Ошибка обработки действия'
 
-    # Update message with new player list
+    # Update message with new player list via event.edit()
+    # attachments=None preserves existing inline keyboard
     payment_url = db.get_event_payment_url(chat_id)
     message_text = create_event_full_text(chat_id, payment_url)
     safe_text = (message_text or "").strip() or " "
 
-    keyboard = build_event_keyboard()
-
     try:
-        await event.bot.edit_message(
-            message_id=event.message.body.mid,
+        await event.edit(
             text=safe_text,
-            attachments=[keyboard] if keyboard else None,
             format=ParseMode.HTML,
+            notification=notification,
         )
         db.save_latest_bot_message(chat_id, event.message.body.mid, safe_text)
     except Exception as e:
-        logger.warning(f"Failed to edit message: {e}")
-        # Send new message if edit fails
+        logger.warning(f"event.edit failed: {e}, sending new message")
+        # Fallback: ack callback + send new message
+        try:
+            await event.ack(notification=notification)
+        except Exception:
+            pass
+        keyboard = build_event_keyboard()
         sent_msg = await event.bot.send_message(
             chat_id=chat_id,
             text=safe_text,
@@ -1125,16 +1137,42 @@ async def main():
     # Initialize database tables
     db.init_database()
 
-    logger.info("MAX Sport Event Bot is starting...")
+    # Webhook configuration (set MAX_WEBHOOK_URL to enable webhook mode)
+    webhook_url = os.getenv('MAX_WEBHOOK_URL', '').strip()
+    webhook_secret = os.getenv('MAX_WEBHOOK_SECRET', '').strip() or None
+    webhook_host = os.getenv('MAX_WEBHOOK_HOST', '127.0.0.1').strip()
+    webhook_port = int(os.getenv('MAX_WEBHOOK_PORT', '8180'))
+    webhook_path = os.getenv('MAX_WEBHOOK_PATH', '/').strip()
 
-    # Delete any existing webhook before polling
+    # Clean up any old webhook subscriptions
     try:
         await bot.delete_webhook()
     except Exception as e:
-        logger.warning(f"Could not delete webhook: {e}")
+        logger.warning(f"Could not delete old webhooks: {e}")
 
-    # Start polling
-    await dp.start_polling(bot)
+    if webhook_url:
+        # === Production: Webhook mode ===
+        logger.info(f"MAX Sport Event Bot starting in WEBHOOK mode")
+        logger.info(f"  Webhook URL: {webhook_url}")
+        logger.info(f"  Local listener: {webhook_host}:{webhook_port}{webhook_path}")
+
+        # Register webhook with MAX API
+        await bot.subscribe_webhook(url=webhook_url, secret=webhook_secret)
+        logger.info("Webhook subscription registered successfully")
+
+        # Start local aiohttp server to receive updates
+        await dp.handle_webhook(
+            bot,
+            host=webhook_host,
+            port=webhook_port,
+            path=webhook_path,
+            secret=webhook_secret,
+        )
+    else:
+        # === Development: Long polling mode ===
+        logger.info("MAX Sport Event Bot starting in POLLING mode (dev only)")
+        logger.warning("Long polling is for development only! Set MAX_WEBHOOK_URL for production.")
+        await dp.start_polling(bot)
 
 
 if __name__ == '__main__':

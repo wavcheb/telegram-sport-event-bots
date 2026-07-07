@@ -102,19 +102,11 @@ Sport Event Bot (Telegram) and MAX Sport Event Bot can share a database and link
    GRANT ALL PRIVILEGES ON tournament_bot.* TO 'tournament_bot'@'localhost';
    ```
 
-4. **Configure environment**
+4. **Configure environment** (each bot has its own `.env.example`)
    ```bash
-   cp .env.example .env
-   nano .env
-   ```
-
-   Set your values:
-   ```
-   TELEGRAM_BOT_TOKEN=your_sport_bot_token
-   MYSQL_HOST=localhost
-   MYSQL_DATABASE=futsal_bot
-   MYSQL_USER=futsal_bot
-   MYSQL_PASSWORD=your_password
+   cd sport_event_bot && cp .env.example .env && nano .env
+   cd ../max_sporteventbot && cp .env.example .env && nano .env
+   cd ../tournament_bot && cp .env.example .env && nano .env
    ```
 
    Secure the file:
@@ -137,33 +129,34 @@ Sport Event Bot (Telegram) and MAX Sport Event Bot can share a database and link
 
 ```
 telegram-sport-event-bots/
-├── .env.example              # Environment config template
-├── .env                      # Your config (create from template)
 ├── sport_event_bot/          # Telegram Sport Event Bot
 │   ├── bot.py               # Main bot logic
 │   ├── db_mysql.py          # Database operations
-│   ├── run.sh               # Standalone run script
+│   ├── .env.example         # Environment config template
+│   ├── requirements.txt     # Python dependencies
+│   ├── run.sh               # Run script
 │   ├── setup_venv.sh        # Virtual environment setup
+│   ├── *.service            # Systemd service files
 │   ├── locale/              # Translations (RU, UK, PT, AR)
 │   └── README.md            # Bot documentation
 ├── max_sporteventbot/        # MAX Sport Event Bot
 │   ├── bot.py               # Main bot logic
 │   ├── db_mysql.py          # Database operations
-│   ├── run.sh               # Standalone run script
+│   ├── .env.example         # Environment config template
+│   ├── requirements.txt     # Python dependencies
+│   ├── run.sh               # Run script
 │   ├── setup_venv.sh        # Virtual environment setup
-│   ├── requirements.txt     # MAX bot dependencies
+│   ├── *.service            # Systemd service files
 │   └── README.md            # Bot documentation
 ├── tournament_bot/           # Tournament Bot
 │   ├── bot.py               # Main bot logic
 │   ├── db_tournament.py     # Database operations
-│   ├── tournament_logic.py  # Tournament algorithms
+│   ├── .env.example         # Environment config template
+│   ├── requirements.txt     # Python dependencies
+│   ├── run.sh               # Run script
 │   ├── setup_venv.sh        # Virtual environment setup
+│   ├── *.service            # Systemd service files
 │   └── README.md            # Bot documentation
-├── run_sport_event_bot.sh   # Sport Event Bot launcher
-├── run_max_sport_event_bot.sh # MAX Bot launcher
-├── run_tournament_bot.sh    # Tournament Bot launcher
-├── setup_all.sh             # Setup all bots at once
-├── requirements.txt         # Python dependencies
 ├── INSTALL.md               # Detailed installation guide
 ├── DEPLOY.md                # Production deployment guide
 └── README.md                # This file
@@ -171,29 +164,18 @@ telegram-sport-event-bots/
 
 ## 🔧 Configuration
 
-Configuration is centralized in `.env` file:
-- **TELEGRAM_BOT_TOKEN**: Telegram bot token from @BotFather
-- **MAX_BOT_TOKEN**: MAX Messenger bot token
-- **MYSQL_HOST/DATABASE/USER/PASSWORD**: Database credentials
+Each bot has its own `.env.example` — copy it to `.env` and fill in your values.
+See the bot's README for available settings.
 
-### Deployment Options
+### Deployment
 
-**Option 1: Monorepo** - All bots in one directory
+Each bot is self-contained — copy its directory anywhere and run:
 ```bash
-cd telegram-sport-event-bots
-./run_sport_event_bot.sh
-./run_max_sport_event_bot.sh
-```
-
-**Option 2: Standalone** - Each bot in separate directory
-```bash
-# Copy to separate directories
-cp -r sport_event_bot /usr/local/tgbot/sportevent
-cp -r max_sporteventbot /usr/local/maxbot/sporteventbot
-
-# Run standalone
-cd /usr/local/tgbot/sportevent && ./run.sh
-cd /usr/local/maxbot/sporteventbot && ./run.sh
+cp -r sport_event_bot /usr/local/tgbot/sport_event_bot
+cd /usr/local/tgbot/sport_event_bot
+cp .env.example .env && nano .env
+./setup_venv.sh
+./run.sh
 ```
 
 ### Shared Database for Cross-Platform
@@ -206,6 +188,12 @@ MYSQL_DATABASE=futsal_bot
 ```
 
 Bots are separated by `platform` field (`telegram` / `max`).
+
+### Telegram API in Blocked Regions
+
+If Telegram API is blocked in your region, you can use either:
+- **SOCKS/HTTP proxy** — set `TELEGRAM_PROXY` in `.env`
+- **Cloudflare Worker proxy** — deploy a Telegram API proxy worker (e.g. [cloudflare-worker-telegram-bot-api](https://github.com/nickytonline/cloudflare-worker-telegram-bot-api)) and set `TG_API_URL` in `.env`
 
 ### Why Separate Virtual Environments?
 
