@@ -350,12 +350,16 @@ async def create_tournament(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return ConversationHandler.END
 
     # Start creation process
+    # do_quote=True: the prompt must be an actual reply to the user's message,
+    # otherwise ForceReply(selective=True) targets nobody and in group chats
+    # (privacy mode) the bot never receives the answer.
     await update.message.reply_text(
         "🏆 <b>Создание турнира</b>\n\n"
         "Сколько команд будет участвовать?\n"
         "Введите число от 2 до 20:",
         parse_mode=ParseMode.HTML,
-        reply_markup=ForceReply(selective=True)
+        reply_markup=ForceReply(selective=True),
+        do_quote=True
     )
 
     # Store user_id in context for later
@@ -374,7 +378,8 @@ async def receive_team_count(update: Update, context: ContextTypes.DEFAULT_TYPE)
             await update.message.reply_text(
                 "❌ Количество команд должно быть от 2 до 20.\n"
                 "Попробуйте еще раз:",
-                reply_markup=ForceReply(selective=True)
+                reply_markup=ForceReply(selective=True),
+                do_quote=True
             )
             return AWAITING_TEAM_COUNT
 
@@ -389,7 +394,8 @@ async def receive_team_count(update: Update, context: ContextTypes.DEFAULT_TYPE)
             f"• Пробел: <code>Барселона Реал Бавария</code>\n"
             f"• С новой строки:\n<code>Барселона\nРеал\nБавария</code>",
             parse_mode=ParseMode.HTML,
-            reply_markup=ForceReply(selective=True)
+            reply_markup=ForceReply(selective=True),
+            do_quote=True
         )
 
         return AWAITING_TEAM_NAMES
@@ -397,7 +403,8 @@ async def receive_team_count(update: Update, context: ContextTypes.DEFAULT_TYPE)
     except ValueError:
         await update.message.reply_text(
             "❌ Пожалуйста, введите число от 2 до 20:",
-            reply_markup=ForceReply(selective=True)
+            reply_markup=ForceReply(selective=True),
+            do_quote=True
         )
         return AWAITING_TEAM_COUNT
 
@@ -416,7 +423,8 @@ async def receive_team_names(update: Update, context: ContextTypes.DEFAULT_TYPE)
         await update.message.reply_text(
             f"❌ {error_msg}\n\n"
             f"Попробуйте еще раз. Нужно {expected_count} команд:",
-            reply_markup=ForceReply(selective=True)
+            reply_markup=ForceReply(selective=True),
+            do_quote=True
         )
         return AWAITING_TEAM_NAMES
 
@@ -432,7 +440,8 @@ async def receive_team_names(update: Update, context: ContextTypes.DEFAULT_TYPE)
         f"Сколько кругов будет в турнире?\n"
         f"Введите число от 1 до 4:",
         parse_mode=ParseMode.HTML,
-        reply_markup=ForceReply(selective=True)
+        reply_markup=ForceReply(selective=True),
+        do_quote=True
     )
 
     return AWAITING_ROUND_COUNT
@@ -447,7 +456,8 @@ async def receive_round_count(update: Update, context: ContextTypes.DEFAULT_TYPE
             await update.message.reply_text(
                 "❌ Количество кругов должно быть от 1 до 4.\n"
                 "Попробуйте еще раз:",
-                reply_markup=ForceReply(selective=True)
+                reply_markup=ForceReply(selective=True),
+                do_quote=True
             )
             return AWAITING_ROUND_COUNT
 
@@ -479,7 +489,8 @@ async def receive_round_count(update: Update, context: ContextTypes.DEFAULT_TYPE
     except ValueError:
         await update.message.reply_text(
             "❌ Пожалуйста, введите число от 1 до 4:",
-            reply_markup=ForceReply(selective=True)
+            reply_markup=ForceReply(selective=True),
+            do_quote=True
         )
         return AWAITING_ROUND_COUNT
 
@@ -697,11 +708,15 @@ async def handle_match_button(update: Update, context: ContextTypes.DEFAULT_TYPE
     await query.edit_message_reply_markup(reply_markup=None)
 
     # Send a new message with ForceReply so the bot can receive
-    # the user's response in group chats (privacy mode)
+    # the user's response in group chats (privacy mode).
+    # There is no user message to reply to (button press), so we mention
+    # the user in the text — that's what makes selective ForceReply target them.
+    user = query.from_user
+    user_mention = f'<a href="tg://user?id={user.id}">{user.first_name}</a>'
     await query.message.reply_text(
         f"⚽ <b>Матч #{match_num}</b>\n\n"
         f"<b>{team1_name}</b> vs <b>{team2_name}</b>\n\n"
-        f"Введите счет матча в формате:\n"
+        f"{user_mention}, введите счет матча в формате:\n"
         f"• <code>3:1</code>\n"
         f"• <code>3-1</code>\n"
         f"• <code>3 1</code>",
@@ -728,7 +743,8 @@ async def receive_match_score(update: Update, context: ContextTypes.DEFAULT_TYPE
         await update.message.reply_text(
             "❌ Неверный формат счета.\n"
             "Используйте: 3:1 или 3-1 или 3 1",
-            reply_markup=ForceReply(selective=True)
+            reply_markup=ForceReply(selective=True),
+            do_quote=True
         )
         return
 
