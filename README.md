@@ -129,32 +129,35 @@ Sport Event Bot (Telegram) and MAX Sport Event Bot can share a database and link
 
 ```
 telegram-sport-event-bots/
-├── cloudflare-workers/       # CF Worker for Telegram API proxy
 ├── sport_event_bot/          # Telegram Sport Event Bot
 │   ├── bot.py               # Main bot logic
 │   ├── db_mysql.py          # Database operations
-│   ├── run.sh               # Standalone run script
+│   ├── .env.example         # Environment config template
+│   ├── requirements.txt     # Python dependencies
+│   ├── run.sh               # Run script
 │   ├── setup_venv.sh        # Virtual environment setup
+│   ├── *.service            # Systemd service files
 │   ├── locale/              # Translations (RU, UK, PT, AR)
 │   └── README.md            # Bot documentation
 ├── max_sporteventbot/        # MAX Sport Event Bot
 │   ├── bot.py               # Main bot logic
 │   ├── db_mysql.py          # Database operations
-│   ├── run.sh               # Standalone run script
+│   ├── .env.example         # Environment config template
+│   ├── requirements.txt     # Python dependencies
+│   ├── run.sh               # Run script
 │   ├── setup_venv.sh        # Virtual environment setup
-│   ├── requirements.txt     # MAX bot dependencies
+│   ├── *.service            # Systemd service files
 │   └── README.md            # Bot documentation
 ├── tournament_bot/           # Tournament Bot
 │   ├── bot.py               # Main bot logic
 │   ├── db_tournament.py     # Database operations
-│   ├── tournament_logic.py  # Tournament algorithms
+│   ├── .env.example         # Environment config template
+│   ├── requirements.txt     # Python dependencies
+│   ├── run.sh               # Run script
 │   ├── setup_venv.sh        # Virtual environment setup
+│   ├── *.service            # Systemd service files
 │   └── README.md            # Bot documentation
-├── run_sport_event_bot.sh   # Sport Event Bot launcher
-├── run_max_sport_event_bot.sh # MAX Bot launcher
-├── run_tournament_bot.sh    # Tournament Bot launcher
-├── setup_all.sh             # Setup all bots at once
-├── requirements.txt         # Python dependencies
+├── cloudflare-workers/       # CF Worker for Telegram API proxy
 ├── INSTALL.md               # Detailed installation guide
 ├── DEPLOY.md                # Production deployment guide
 └── README.md                # This file
@@ -162,10 +165,8 @@ telegram-sport-event-bots/
 
 ## 🔧 Configuration
 
-Configuration is centralized in `.env` file:
-- **TELEGRAM_BOT_TOKEN**: Telegram bot token from @BotFather
-- **MAX_BOT_TOKEN**: MAX Messenger bot token
-- **MYSQL_HOST/DATABASE/USER/PASSWORD**: Database credentials
+Each bot has its own `.env.example` — copy it to `.env` and fill in your values.
+See the bot's README for available settings.
 
 ### Deployment Options
 

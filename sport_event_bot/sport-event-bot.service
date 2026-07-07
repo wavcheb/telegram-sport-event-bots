@@ -7,15 +7,13 @@ Wants=mysql.service
 Type=simple
 User=YOUR_USERNAME
 Group=YOUR_USERNAME
-WorkingDirectory=/usr/local/tgbot
-EnvironmentFile=/usr/local/tgbot/.env
-ExecStart=/usr/local/tgbot/run_sport_event_bot.sh
+WorkingDirectory=/usr/local/tgbot/sport_event_bot
+ExecStart=/usr/local/tgbot/sport_event_bot/run.sh
 Restart=always
 RestartSec=10
 StandardOutput=append:/usr/local/tgbot/sport_event_bot/logs/systemd.log
 StandardError=append:/usr/local/tgbot/sport_event_bot/logs/systemd.log
 
-# Security
 NoNewPrivileges=true
 PrivateTmp=true
 

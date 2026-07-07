@@ -27,7 +27,9 @@ pip install --upgrade pip
 
 # Install requirements
 echo "📚 Installing dependencies..."
-if [ -f "../requirements.txt" ]; then
+if [ -f "requirements.txt" ]; then
+    pip install -r requirements.txt
+elif [ -f "../requirements.txt" ]; then
     pip install -r ../requirements.txt
 else
     echo "❌ Error: requirements.txt not found"
