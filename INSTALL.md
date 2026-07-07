@@ -117,27 +117,23 @@ git clone https://github.com/wavcheb/telegram-sport-event-bots.git
 cd telegram-sport-event-bots
 ```
 
-### Create Virtual Environment
+### Create Virtual Environment and Install Dependencies
+
+Each bot has its own virtual environment. For Sport Event Bot:
 
 ```bash
-python3 -m venv venv
-source venv/bin/activate
+cd sport_event_bot
+./setup_venv.sh
 ```
 
-Your prompt should now show `(venv)`.
-
-### Install Dependencies
-
-```bash
-pip install --upgrade pip
-pip install -r requirements.txt
-```
+This creates `sport_event_bot/venv/` and installs everything from `sport_event_bot/requirements.txt`.
 
 ### Configure Environment
 
-Create `.env` file from template:
+Create `.env` file from template inside the bot directory:
 
 ```bash
+cd sport_event_bot   # if not already there
 cp .env.example .env
 nano .env
 ```
@@ -164,7 +160,8 @@ chmod 600 .env
 ### Start the Bot
 
 ```bash
-./run_sport_event_bot.sh
+cd sport_event_bot
+./run.sh
 ```
 
 Or directly with Python:
@@ -181,7 +178,7 @@ INFO     | __main__:main:626 - Bot is running...
 ### Test in Telegram
 
 1. Find your bot in Telegram (search by username)
-2. Send `/start` or `/help`
+2. Send `/help` (the bot has no `/start` handler)
 3. Bot should respond with command list
 
 ### Stop the Bot
@@ -192,33 +189,16 @@ Press `Ctrl+C` in the terminal.
 
 ### Create Systemd Service
 
-For production, run bot as a system service:
+For production, run bot as a system service. A ready-made unit file is shipped with the bot — copy it:
 
 ```bash
+sudo cp sport_event_bot/sport-event-bot.service /etc/systemd/system/
 sudo nano /etc/systemd/system/sport-event-bot.service
 ```
 
-Paste this content (adjust paths if needed):
+Adjust `User=`/`Group=` (replace `YOUR_USERNAME` with your actual username) and the `WorkingDirectory=`/`ExecStart=` paths if your bot directory is not `/usr/local/tgbot/sport_event_bot`. The unit runs `run.sh` from the bot directory; `.env` is loaded automatically by the bot (no `EnvironmentFile=` needed).
 
-```ini
-[Unit]
-Description=Sport Event Telegram Bot
-After=network.target mysql.service
-
-[Service]
-Type=simple
-User=YOUR_USERNAME
-WorkingDirectory=/opt/champ
-Environment="PATH=/opt/champ/venv/bin"
-ExecStart=/opt/champ/venv/bin/python -m sport_event_bot.bot
-Restart=always
-RestartSec=10
-
-[Install]
-WantedBy=multi-user.target
-```
-
-Replace `YOUR_USERNAME` with your actual username.
+There is also `sport_event_bot/sport-event-bot-user.service` for running as a systemd user service without root (see [DEPLOY.md](DEPLOY.md)).
 
 ### Enable and Start Service
 
@@ -241,7 +221,7 @@ sudo systemctl status sport-event-bot
 sudo journalctl -u sport-event-bot -f
 
 # Bot application logs
-tail -f /opt/champ/logs/logs.log
+tail -f sport_event_bot/logs/logs.log
 ```
 
 ### Service Management Commands
@@ -284,7 +264,8 @@ chmod 600 .env
 ```bash
 cd /opt/telegram-sport-event-bots
 git pull
-pip install -r requirements.txt --upgrade
+cd sport_event_bot
+venv/bin/pip install -r requirements.txt --upgrade
 sudo systemctl restart sport-event-bot
 ```
 
@@ -322,7 +303,7 @@ sudo nano /etc/logrotate.d/sport-event-bot
 ```
 
 ```
-/opt/champ/logs/*.log {
+/opt/telegram-sport-event-bots/sport_event_bot/logs/*.log {
     daily
     rotate 14
     compress
@@ -344,8 +325,8 @@ python3 --version
 
 **Check virtual environment:**
 ```bash
-source venv/bin/activate
-which python  # Should point to venv/bin/python
+source sport_event_bot/venv/bin/activate
+which python  # Should point to sport_event_bot/venv/bin/python
 ```
 
 **Check dependencies:**
@@ -365,7 +346,7 @@ mysql -u futsal_bot -p futsal_bot
 sudo systemctl status mysql
 ```
 
-**Check credentials in sport_event_bot/db_mysql.py**
+**Check credentials in sport_event_bot/.env**
 
 ### Bot responds slowly
 
@@ -387,8 +368,8 @@ SHOW PROCESSLIST;
 ```bash
 cd /opt/telegram-sport-event-bots
 sudo chown -R $USER:$USER .
-chmod +x run_sport_event_bot.sh run_tournament_bot.sh run_max_sport_event_bot.sh
-chmod 600 .env
+chmod +x */run.sh */setup_venv.sh
+chmod 600 */.env
 ```
 
 ## 📈 Monitoring
@@ -429,7 +410,7 @@ top -p $(pgrep -f sport_event_bot)
 1. **Use tmux or screen** for manual testing:
    ```bash
    tmux new -s bot
-   ./run_sport_event_bot.sh
+   cd sport_event_bot && ./run.sh
    # Detach: Ctrl+B then D
    # Reattach: tmux attach -t bot
    ```

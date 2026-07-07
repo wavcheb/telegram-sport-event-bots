@@ -71,22 +71,18 @@ Sport Event Bot (Telegram) and MAX Sport Event Bot can share a database and link
 
 2. **Setup virtual environments**
 
-   Each bot uses its own isolated virtual environment:
+   Each bot uses its own isolated virtual environment — run the setup script inside each bot directory:
    ```bash
-   # Quick setup for all bots
-   ./setup_all.sh
-
-   # Or setup individually
    cd sport_event_bot && ./setup_venv.sh
    cd ../tournament_bot && ./setup_venv.sh
+   cd ../max_sporteventbot && ./setup_venv.sh
    ```
 
-   **⚠️ If you get "cannot execute: required file not found" error:**
+   **⚠️ If you get "cannot execute: required file not found" error** (Windows line endings):
    ```bash
-   chmod +x fix_line_endings.sh
-   ./fix_line_endings.sh
+   sudo apt install dos2unix
+   find . -name "*.sh" -type f -exec dos2unix {} \;
    ```
-   This fixes Windows line ending issues on Linux.
 
 3. **Configure databases**
 
@@ -117,10 +113,13 @@ Sport Event Bot (Telegram) and MAX Sport Event Bot can share a database and link
 5. **Run the bots**
    ```bash
    # Run Sport Event Bot
-   ./run_sport_event_bot.sh
+   cd sport_event_bot && ./run.sh
 
    # Run Tournament Bot (in another terminal)
-   ./run_tournament_bot.sh
+   cd tournament_bot && ./run.sh
+
+   # Run MAX Sport Event Bot (in another terminal)
+   cd max_sporteventbot && ./run.sh
    ```
 
 **For production deployment**, see [DEPLOY.md](DEPLOY.md) for complete instructions including systemd services.
@@ -132,6 +131,7 @@ telegram-sport-event-bots/
 ├── sport_event_bot/          # Telegram Sport Event Bot
 │   ├── bot.py               # Main bot logic
 │   ├── db_mysql.py          # Database operations
+│   ├── telegraph.py         # Telegraph API for payment logs
 │   ├── .env.example         # Environment config template
 │   ├── requirements.txt     # Python dependencies
 │   ├── run.sh               # Run script
@@ -157,6 +157,9 @@ telegram-sport-event-bots/
 │   ├── setup_venv.sh        # Virtual environment setup
 │   ├── *.service            # Systemd service files
 │   └── README.md            # Bot documentation
+├── web/                      # Optional web page for payment status
+│   ├── payments.php         # Payments page
+│   └── config.example.php   # Web page config template
 ├── INSTALL.md               # Detailed installation guide
 ├── DEPLOY.md                # Production deployment guide
 └── README.md                # This file
@@ -236,10 +239,8 @@ Each bot is a self-contained Python package:
 To add a new bot to the collection:
 1. Create a new directory (e.g., `new_bot/`)
 2. Add `__init__.py` and `bot.py`
-3. Create `setup_venv.sh`, `run.sh` and `logs/` directory
-4. Add startup script `run_new_bot.sh` in root
-5. Add bot token variable to `.env.example`
-6. Update this README
+3. Create `setup_venv.sh`, `run.sh`, `requirements.txt` and `.env.example` inside the new bot directory
+4. Update this README
 
 ## 🤝 Integration
 
@@ -251,8 +252,10 @@ Both bots can run simultaneously:
 
 ## 📝 Requirements
 
-See [requirements.txt](requirements.txt) for full list of dependencies:
-- python-telegram-bot >= 22.0
+Each bot has its own `requirements.txt` (e.g. [sport_event_bot/requirements.txt](sport_event_bot/requirements.txt)). Main dependencies:
+- python-telegram-bot >= 22.0 (Telegram bots) / maxapi >= 1.2.0 (MAX bot)
+- python-dotenv
+- httpx[socks]
 - mysql-connector-python
 - loguru
 - parsedatetime
@@ -264,7 +267,7 @@ See [requirements.txt](requirements.txt) for full list of dependencies:
 
 - **Database connection fails**: Check MySQL credentials in `.env`
 - **Bot doesn't start**: Verify TELEGRAM_BOT_TOKEN in `.env`
-- **Permission errors**: Check file permissions with `chmod +x run_*.sh`
+- **Permission errors**: Check file permissions with `chmod +x */run.sh */setup_venv.sh`
 
 ### Bot-Specific Issues
 

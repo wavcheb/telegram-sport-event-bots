@@ -9,6 +9,8 @@
 - Добавление легионеров (гостей)
 - Подтверждение оплаты
 - Кросс-платформенная связка с Telegram ботом
+- Режим webhook для production (с автоматическим откатом на long polling)
+- Toast-уведомления (всплывающие подсказки) при нажатии кнопок вместо сообщений в чат
 
 ## Установка
 
@@ -51,6 +53,21 @@ MYSQL_USER=futsal_bot
 MYSQL_PASSWORD=пароль
 ```
 
+Webhook (обязательно для production; если `MAX_WEBHOOK_URL` не задан, бот работает в режиме long polling — только для разработки):
+
+```
+# Публичный HTTPS URL, на который MAX будет отправлять обновления
+MAX_WEBHOOK_URL=https://example.com/maxbot-webhook/
+
+# Секрет для проверки webhook-запросов (рекомендуется)
+MAX_WEBHOOK_SECRET=случайная_строка
+
+# Локальный aiohttp-листенер (за nginx reverse proxy)
+MAX_WEBHOOK_HOST=127.0.0.1
+MAX_WEBHOOK_PORT=8180
+MAX_WEBHOOK_PATH=/
+```
+
 Опциональные переменные:
 
 ```
@@ -59,6 +76,12 @@ PAYMENTS_PAGE_URL=https://example.com/payments.php
 
 # Для автоматической синхронизации в Telegram (кросс-API)
 TG_BOT_TOKEN=токен_telegram_бота
+
+# Доступ к Telegram API из заблокированных регионов:
+# SOCKS/HTTP прокси
+TELEGRAM_PROXY=socks5://127.0.0.1:1080
+# или Cloudflare Worker прокси для api.telegram.org
+TG_API_URL=https://tg-api-proxy.your-domain.workers.dev
 ```
 
 ## Запуск
@@ -79,7 +102,20 @@ python bot.py
 | Команда | Описание |
 |---------|----------|
 | `/start` | Начало работы с ботом |
-| `/event` | Создать новое событие |
+| `/help` | Список доступных команд |
+| `/event_add` | Создать новое событие |
+| `/event_remove` | Закрыть текущее событие |
+| `/event_update` | Изменить описание события |
+| `/limit` | Установить лимит участников |
+| `/info` | Показать текущее событие |
+| `/add` | Записаться на событие |
+| `/remove` | Отменить запись |
+| `/add_leg` | Добавить легионера (гостя) |
+| `/rem_leg` | Убрать последнего легионера |
+| `/pay` | Подтвердить оплату |
+| `/fix` | Зафиксировать состав и статистику |
+| `/penalty` | Добавить штраф за неявку |
+| `/stat` | Статистика участников |
 | `/link` | Связать чат с Telegram чатом |
 | `/unlink` | Отвязать чат |
 | `/event_copy` | Синхронизировать участников из Telegram |
@@ -128,32 +164,32 @@ MAX и Telegram боты могут использовать общую базу
 
 ## systemd сервис
 
-Создайте файл `/etc/systemd/system/max-sport-event-bot.service`:
+Готовые unit-файлы поставляются вместе с ботом:
 
-```ini
-[Unit]
-Description=MAX Sport Event Bot
-After=network.target mysql.service
+- `max-sport-event-bot.service` — системный сервис (требует root)
+- `max-sport-event-bot-user.service` — пользовательский сервис (без root)
 
-[Service]
-Type=simple
-User=YOUR_USERNAME
-WorkingDirectory=/usr/local/maxbot/sporteventbot
-EnvironmentFile=/usr/local/maxbot/sporteventbot/.env
-ExecStart=/usr/local/maxbot/sporteventbot/run.sh
-Restart=always
-RestartSec=10
+Они запускают `run.sh` из директории бота (`WorkingDirectory=/usr/local/maxbot/sporteventbot`). `EnvironmentFile=` не используется — `.env` загружается самим ботом через python-dotenv.
 
-[Install]
-WantedBy=multi-user.target
-```
-
-Запуск:
+Установка системного сервиса:
 
 ```bash
+sudo cp max-sport-event-bot.service /etc/systemd/system/
+sudo nano /etc/systemd/system/max-sport-event-bot.service  # замените YOUR_USERNAME и пути при необходимости
+
 sudo systemctl daemon-reload
 sudo systemctl enable max-sport-event-bot
 sudo systemctl start max-sport-event-bot
+```
+
+Или пользовательский сервис (без root):
+
+```bash
+mkdir -p ~/.config/systemd/user
+cp max-sport-event-bot-user.service ~/.config/systemd/user/max-sport-event-bot.service
+systemctl --user daemon-reload
+systemctl --user enable --now max-sport-event-bot
+loginctl enable-linger $USER
 ```
 
 ## Логи
@@ -167,7 +203,10 @@ tail -f logs/logs.log
 ## Зависимости
 
 - Python 3.11+
-- maxapi (MAX Messenger API)
+- maxapi >= 1.2.0 (MAX Messenger API)
 - mysql-connector-python
 - python-dotenv
 - loguru
+- requests[socks] (кросс-платформенная синхронизация, поддержка SOCKS-прокси)
+- parsedatetime
+- recurrent

@@ -56,43 +56,29 @@ git clone https://github.com/wavcheb/telegram-sport-event-bots.git .
 Each bot uses its own isolated virtual environment:
 
 ```bash
-# IMPORTANT: Fix line endings first (if cloning on Linux from Windows/Git)
-# If you get "cannot execute: required file not found" error, run:
-chmod +x fix_line_endings.sh
-./fix_line_endings.sh
+# Make per-bot scripts executable
+chmod +x */setup_venv.sh */run.sh
 
-# Make setup scripts executable
-chmod +x setup_all.sh
-chmod +x sport_event_bot/setup_venv.sh
-chmod +x tournament_bot/setup_venv.sh
-chmod +x max_sporteventbot/setup_venv.sh
-chmod +x run_sport_event_bot.sh
-chmod +x run_tournament_bot.sh
-chmod +x run_max_sport_event_bot.sh
-
-# Run setup for all bots
-./setup_all.sh
+# Run setup for each bot
+(cd sport_event_bot && ./setup_venv.sh)
+(cd tournament_bot && ./setup_venv.sh)
+(cd max_sporteventbot && ./setup_venv.sh)
 ```
 
 This will:
 - Create `sport_event_bot/venv/` with all dependencies
 - Create `tournament_bot/venv/` with all dependencies
 - Create `max_sporteventbot/venv/` with all dependencies
-- Install all required packages from `requirements.txt`
+- Install all required packages from each bot's own `requirements.txt`
 
 **Common Issue - Line Endings:**
-If you see error: `./setup_all.sh: cannot execute: required file not found`
+If you see error: `./setup_venv.sh: cannot execute: required file not found`
 
 This means files have Windows line endings (CRLF). Quick fix:
 ```bash
-# Option 1: Use fix script (recommended)
-chmod +x fix_line_endings.sh
-./fix_line_endings.sh
-
-# Option 2: Manual fix
 sudo apt install dos2unix
 find . -name "*.sh" -type f -exec dos2unix {} \;
-chmod +x *.sh sport_event_bot/*.sh tournament_bot/*.sh
+chmod +x */setup_venv.sh */run.sh
 ```
 
 ### 3. Configure Databases
@@ -111,8 +97,9 @@ FLUSH PRIVILEGES;
 EXIT;
 ```
 
-Create `.env` file:
+Create `.env` file inside the bot directory:
 ```bash
+cd sport_event_bot
 cp .env.example .env
 nano .env
 ```
@@ -145,8 +132,13 @@ FLUSH PRIVILEGES;
 EXIT;
 ```
 
-Configuration is read from `.env` file (same file as Sport Event Bot).
-Add tournament bot settings if using separate database:
+Tournament Bot reads configuration from its **own** `.env` file in `tournament_bot/` (not shared with Sport Event Bot):
+```bash
+cd tournament_bot
+cp .env.example .env
+nano .env
+```
+
 ```
 TOURNAMENT_BOT_TOKEN=your_tournament_bot_token
 TOURNAMENT_MYSQL_DATABASE=tournament_bot
@@ -163,14 +155,15 @@ deactivate
 
 ### 4. Configure Bots
 
-Both bots read configuration from `.env` file in the project root:
+Each bot reads configuration from the `.env` file in its **own** directory:
 
 ```bash
-cp .env.example .env
-nano .env
+cd sport_event_bot && cp .env.example .env && nano .env
+cd ../tournament_bot && cp .env.example .env && nano .env
+cd ../max_sporteventbot && cp .env.example .env && nano .env
 ```
 
-Set all required values:
+Set all required values (Sport Event Bot example):
 ```
 # Sport Event Bot
 TELEGRAM_BOT_TOKEN=your_sport_bot_token
@@ -182,9 +175,9 @@ MYSQL_USER=futsal_bot
 MYSQL_PASSWORD=your_secure_password
 ```
 
-**Secure the config:**
+**Secure the configs:**
 ```bash
-chmod 600 .env
+chmod 600 */.env
 ```
 
 **Note:** The `.env` file is the recommended way to configure credentials.
@@ -193,12 +186,13 @@ chmod 600 .env
 
 ### Test Sport Event Bot
 ```bash
-./run_sport_event_bot.sh
+cd sport_event_bot
+./run.sh
 ```
 
 You should see:
 ```
-🚀 Starting Sport Event Bot...
+Starting Sport Event Bot...
 INFO | Telegram Futsal Bot is starting...
 ```
 
@@ -206,13 +200,14 @@ Press `Ctrl+C` to stop.
 
 ### Test Tournament Bot
 ```bash
-./run_tournament_bot.sh
+cd tournament_bot
+./run.sh
 ```
 
 You should see:
 ```
-🚀 Starting Tournament Bot...
-INFO | Tournament Bot started
+Starting Tournament Bot...
+INFO | Tournament Bot starting...
 ```
 
 Press `Ctrl+C` to stop.
@@ -233,62 +228,20 @@ Press `Ctrl+C` to stop.
 mkdir -p ~/.config/systemd/user
 ```
 
-#### 2. Create Service Files
+#### 2. Copy Shipped Service Files
 
-**Sport Event Bot:**
+Ready-made user service files are shipped in each bot directory:
+
+```bash
+cp sport_event_bot/sport-event-bot-user.service ~/.config/systemd/user/sport-event-bot.service
+cp tournament_bot/tournament-bot-user.service ~/.config/systemd/user/tournament-bot.service
+cp max_sporteventbot/max-sport-event-bot-user.service ~/.config/systemd/user/max-sport-event-bot.service
+```
+
+These units point `WorkingDirectory=` and `ExecStart=` into the bot directory (e.g. `%h/tgbot/sport_event_bot`) and run the bot's `run.sh`. There is **no** `EnvironmentFile=` — each bot loads its own `.env` via python-dotenv. Edit the copied files if your bots live elsewhere:
+
 ```bash
 nano ~/.config/systemd/user/sport-event-bot.service
-```
-
-Paste:
-```ini
-[Unit]
-Description=Telegram Sport Event Bot (User Service)
-After=network.target
-
-[Service]
-Type=simple
-WorkingDirectory=%h/tgbot
-EnvironmentFile=%h/tgbot/.env
-ExecStart=%h/tgbot/run_sport_event_bot.sh
-Restart=always
-RestartSec=10
-StandardOutput=append:%h/tgbot/sport_event_bot/logs/systemd.log
-StandardError=append:%h/tgbot/sport_event_bot/logs/systemd.log
-
-NoNewPrivileges=true
-PrivateTmp=true
-
-[Install]
-WantedBy=default.target
-```
-
-**Tournament Bot:**
-```bash
-nano ~/.config/systemd/user/tournament-bot.service
-```
-
-Paste:
-```ini
-[Unit]
-Description=Telegram Tournament Bot (User Service)
-After=network.target
-
-[Service]
-Type=simple
-WorkingDirectory=%h/tgbot
-EnvironmentFile=%h/tgbot/.env
-ExecStart=%h/tgbot/run_tournament_bot.sh
-Restart=always
-RestartSec=10
-StandardOutput=append:%h/tgbot/tournament_bot/logs/systemd.log
-StandardError=append:%h/tgbot/tournament_bot/logs/systemd.log
-
-NoNewPrivileges=true
-PrivateTmp=true
-
-[Install]
-WantedBy=default.target
 ```
 
 **Note:** `%h` автоматически заменяется на домашнюю директорию пользователя.
@@ -345,75 +298,25 @@ journalctl --user -u tournament-bot -f
 
 Если у вас есть sudo доступ и вы хотите запускать боты как системные сервисы:
 
-#### 1. Create systemd Service for Sport Event Bot
+#### 1. Copy Shipped Service Files
+
+Ready-made system service files are shipped in each bot directory:
+
+```bash
+sudo cp sport_event_bot/sport-event-bot.service /etc/systemd/system/
+sudo cp tournament_bot/tournament-bot.service /etc/systemd/system/
+sudo cp max_sporteventbot/max-sport-event-bot.service /etc/systemd/system/
+```
+
+These units point `WorkingDirectory=` and `ExecStart=` into the bot directory (e.g. `/usr/local/tgbot/sport_event_bot`) and run the bot's `run.sh`. There is **no** `EnvironmentFile=` — each bot loads its own `.env` via python-dotenv.
+
+Edit the copied files: replace `YOUR_USERNAME` in `User=`/`Group=` with your actual username (check with `whoami`), and adjust paths if your bots live elsewhere:
 
 ```bash
 sudo nano /etc/systemd/system/sport-event-bot.service
-```
-
-Paste:
-```ini
-[Unit]
-Description=Telegram Sport Event Bot
-After=network.target mysql.service
-Wants=mysql.service
-
-[Service]
-Type=simple
-User=YOUR_USERNAME
-Group=YOUR_USERNAME
-WorkingDirectory=/usr/local/tgbot
-EnvironmentFile=/usr/local/tgbot/.env
-ExecStart=/usr/local/tgbot/run_sport_event_bot.sh
-Restart=always
-RestartSec=10
-StandardOutput=append:/usr/local/tgbot/sport_event_bot/logs/systemd.log
-StandardError=append:/usr/local/tgbot/sport_event_bot/logs/systemd.log
-
-# Security
-NoNewPrivileges=true
-PrivateTmp=true
-
-[Install]
-WantedBy=multi-user.target
-```
-
-Replace `YOUR_USERNAME` with your actual username (check with `whoami`).
-
-### 2. Create systemd Service for Tournament Bot
-
-```bash
 sudo nano /etc/systemd/system/tournament-bot.service
+sudo nano /etc/systemd/system/max-sport-event-bot.service
 ```
-
-Paste:
-```ini
-[Unit]
-Description=Telegram Tournament Bot
-After=network.target mysql.service
-Wants=mysql.service
-
-[Service]
-Type=simple
-User=YOUR_USERNAME
-Group=YOUR_USERNAME
-WorkingDirectory=/usr/local/tgbot
-EnvironmentFile=/usr/local/tgbot/.env
-ExecStart=/usr/local/tgbot/run_tournament_bot.sh
-Restart=always
-RestartSec=10
-StandardOutput=append:/usr/local/tgbot/tournament_bot/logs/systemd.log
-StandardError=append:/usr/local/tgbot/tournament_bot/logs/systemd.log
-
-# Security
-NoNewPrivileges=true
-PrivateTmp=true
-
-[Install]
-WantedBy=multi-user.target
-```
-
-Replace `YOUR_USERNAME` with your actual username.
 
 #### 2. Enable and Start System Services
 
@@ -528,7 +431,7 @@ sudo apt install dos2unix
 find . -name "*.sh" -type f -exec dos2unix {} \;
 
 # Make scripts executable again
-chmod +x setup_all.sh run_*.sh */setup_venv.sh */run.sh
+chmod +x */setup_venv.sh */run.sh
 ```
 
 ### Virtual Environment Issues
@@ -540,7 +443,8 @@ sudo apt install python3-venv python3-pip
 
 # Remove old venv and recreate
 rm -rf sport_event_bot/venv tournament_bot/venv
-./setup_all.sh
+(cd sport_event_bot && ./setup_venv.sh)
+(cd tournament_bot && ./setup_venv.sh)
 ```
 
 ### Database Connection Issues
@@ -569,7 +473,7 @@ python -m sport_event_bot.bot
 deactivate
 
 # Check .env file
-grep TELEGRAM_BOT_TOKEN .env | wc -c  # Should show token is set
+grep TELEGRAM_BOT_TOKEN sport_event_bot/.env | wc -c  # Should show token is set
 ```
 
 ### Permission Errors
@@ -582,9 +486,8 @@ sudo chown -R $USER:$USER /usr/local/tgbot
 chmod 755 /usr/local/tgbot
 chmod 755 /usr/local/tgbot/sport_event_bot
 chmod 755 /usr/local/tgbot/tournament_bot
-chmod 600 /usr/local/tgbot/.env
-chmod +x /usr/local/tgbot/*.sh
-chmod +x /usr/local/tgbot/*/setup_venv.sh
+chmod 600 /usr/local/tgbot/*/.env
+chmod +x /usr/local/tgbot/*/setup_venv.sh /usr/local/tgbot/*/run.sh
 ```
 
 ## 🔄 Updates
@@ -600,9 +503,9 @@ sudo systemctl stop sport-event-bot tournament-bot
 # Pull updates
 git pull
 
-# Reinstall dependencies if needed
-cd sport_event_bot && source venv/bin/activate && pip install -r ../requirements.txt && deactivate
-cd ../tournament_bot && source venv/bin/activate && pip install -r ../requirements.txt && deactivate
+# Reinstall dependencies if needed (each bot has its own requirements.txt)
+cd sport_event_bot && source venv/bin/activate && pip install -r requirements.txt && deactivate
+cd ../tournament_bot && source venv/bin/activate && pip install -r requirements.txt && deactivate
 
 # Start services
 sudo systemctl start sport-event-bot tournament-bot
