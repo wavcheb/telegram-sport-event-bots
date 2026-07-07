@@ -12,9 +12,8 @@ from pathlib import Path
 from loguru import logger
 from dotenv import load_dotenv
 
-# Load .env from project root
-PROJECT_ROOT = Path(__file__).resolve().parent.parent
-load_dotenv(PROJECT_ROOT / '.env')
+BOT_DIR = Path(__file__).resolve().parent
+load_dotenv(BOT_DIR / '.env')
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup, ForceReply
 from telegram.ext import (
     Application,

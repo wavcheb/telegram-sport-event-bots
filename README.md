@@ -102,19 +102,11 @@ Sport Event Bot (Telegram) and MAX Sport Event Bot can share a database and link
    GRANT ALL PRIVILEGES ON tournament_bot.* TO 'tournament_bot'@'localhost';
    ```
 
-4. **Configure environment**
+4. **Configure environment** (each bot has its own `.env.example`)
    ```bash
-   cp .env.example .env
-   nano .env
-   ```
-
-   Set your values:
-   ```
-   TELEGRAM_BOT_TOKEN=your_sport_bot_token
-   MYSQL_HOST=localhost
-   MYSQL_DATABASE=futsal_bot
-   MYSQL_USER=futsal_bot
-   MYSQL_PASSWORD=your_password
+   cd sport_event_bot && cp .env.example .env && nano .env
+   cd ../max_sporteventbot && cp .env.example .env && nano .env
+   cd ../tournament_bot && cp .env.example .env && nano .env
    ```
 
    Secure the file:
@@ -137,8 +129,7 @@ Sport Event Bot (Telegram) and MAX Sport Event Bot can share a database and link
 
 ```
 telegram-sport-event-bots/
-├── .env.example              # Environment config template
-├── .env                      # Your config (create from template)
+├── cloudflare-workers/       # CF Worker for Telegram API proxy
 ├── sport_event_bot/          # Telegram Sport Event Bot
 │   ├── bot.py               # Main bot logic
 │   ├── db_mysql.py          # Database operations

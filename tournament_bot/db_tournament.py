@@ -14,9 +14,8 @@ import mysql.connector
 from mysql.connector import Error
 from dotenv import load_dotenv
 
-# Load .env from project root
-PROJECT_ROOT = Path(__file__).resolve().parent.parent
-load_dotenv(PROJECT_ROOT / '.env')
+BOT_DIR = Path(__file__).resolve().parent
+load_dotenv(BOT_DIR / '.env')
 
 # Connection settings from environment
 # Tournament bot can use its own DB settings or share with sport_event_bot
