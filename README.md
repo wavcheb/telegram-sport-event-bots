@@ -157,7 +157,6 @@ telegram-sport-event-bots/
 │   ├── setup_venv.sh        # Virtual environment setup
 │   ├── *.service            # Systemd service files
 │   └── README.md            # Bot documentation
-├── cloudflare-workers/       # CF Worker for Telegram API proxy
 ├── INSTALL.md               # Detailed installation guide
 ├── DEPLOY.md                # Production deployment guide
 └── README.md                # This file
@@ -168,24 +167,15 @@ telegram-sport-event-bots/
 Each bot has its own `.env.example` — copy it to `.env` and fill in your values.
 See the bot's README for available settings.
 
-### Deployment Options
+### Deployment
 
-**Option 1: Monorepo** - All bots in one directory
+Each bot is self-contained — copy its directory anywhere and run:
 ```bash
-cd telegram-sport-event-bots
-./run_sport_event_bot.sh
-./run_max_sport_event_bot.sh
-```
-
-**Option 2: Standalone** - Each bot in separate directory
-```bash
-# Copy to separate directories
-cp -r sport_event_bot /usr/local/tgbot/sportevent
-cp -r max_sporteventbot /usr/local/maxbot/sporteventbot
-
-# Run standalone
-cd /usr/local/tgbot/sportevent && ./run.sh
-cd /usr/local/maxbot/sporteventbot && ./run.sh
+cp -r sport_event_bot /usr/local/tgbot/sport_event_bot
+cd /usr/local/tgbot/sport_event_bot
+cp .env.example .env && nano .env
+./setup_venv.sh
+./run.sh
 ```
 
 ### Shared Database for Cross-Platform
@@ -198,6 +188,12 @@ MYSQL_DATABASE=futsal_bot
 ```
 
 Bots are separated by `platform` field (`telegram` / `max`).
+
+### Telegram API in Blocked Regions
+
+If Telegram API is blocked in your region, you can use either:
+- **SOCKS/HTTP proxy** — set `TELEGRAM_PROXY` in `.env`
+- **Cloudflare Worker proxy** — deploy a Telegram API proxy worker (e.g. [cloudflare-worker-telegram-bot-api](https://github.com/nickytonline/cloudflare-worker-telegram-bot-api)) and set `TG_API_URL` in `.env`
 
 ### Why Separate Virtual Environments?
 
