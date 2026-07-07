@@ -72,8 +72,20 @@ TELEGRAM_PROXY = os.getenv('TELEGRAM_PROXY', '').strip()
 
 # CF Worker proxy URL for Telegram API (alternative to SOCKS proxy)
 # Example: https://tg-api-proxy.your-domain.workers.dev
-TG_API_URL = os.getenv('TG_API_URL', '').strip()
-TG_API_BASE = TG_API_URL.rstrip('/') if TG_API_URL else 'https://api.telegram.org'
+def _normalize_tg_api_url(url: str) -> str:
+    """Accept TG_API_URL with or without trailing '/' or '/bot'; require http(s)."""
+    url = (url or '').strip().rstrip('/')
+    if not url:
+        return ''
+    if url.endswith('/bot'):
+        url = url[:-4].rstrip('/')
+    if not url.startswith(('http://', 'https://')):
+        logger.warning(f"TG_API_URL must start with http:// or https://, ignoring: {url}")
+        return ''
+    return url
+
+TG_API_URL = _normalize_tg_api_url(os.getenv('TG_API_URL', ''))
+TG_API_BASE = TG_API_URL if TG_API_URL else 'https://api.telegram.org'
 
 
 def _coerce_to_datetime(val: object) -> Optional[datetime.datetime]:

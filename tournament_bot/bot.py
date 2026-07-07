@@ -27,8 +27,14 @@ from telegram.ext import (
 )
 from telegram.constants import ParseMode
 
-from . import db_tournament as db
-from . import tournament_logic as logic
+# Support both package mode (python -m tournament_bot.bot) and
+# standalone mode (python bot.py, as run.sh does)
+try:
+    from . import db_tournament as db
+    from . import tournament_logic as logic
+except ImportError:
+    import db_tournament as db
+    import tournament_logic as logic
 
 # Bot directory path
 BOT_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -1055,6 +1061,24 @@ async def edit_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 PID_FILE = os.path.join(BOT_DIR, "tournament_bot.pid")
 
+def _normalize_tg_api_url(url: str) -> str:
+    """Normalize TG_API_URL (CF Worker proxy base).
+
+    Accepts the URL with or without trailing '/' or '/bot'. Requires an
+    http(s) scheme: without it (or with a wrong base) the token would be
+    glued to the host part and httpx fails with "Invalid port: '<token>'".
+    """
+    url = (url or '').strip().rstrip('/')
+    if not url:
+        return ''
+    if url.endswith('/bot'):
+        url = url[:-4].rstrip('/')
+    if not url.startswith(('http://', 'https://')):
+        logger.warning(f"TG_API_URL must start with http:// or https://, ignoring: {url}")
+        return ''
+    return url
+
+
 def check_pid_lock():
     """Check if another instance is already running. Exit if so."""
     if os.path.exists(PID_FILE):
@@ -1117,10 +1141,10 @@ async def main():
     # Option 1: CF Worker proxy (preferred) — set TG_API_URL to worker URL
     # Option 2: SOCKS/HTTP proxy — set TELEGRAM_PROXY
     proxy_url = os.getenv('TELEGRAM_PROXY')
-    tg_api_url = os.getenv('TG_API_URL', '').strip()
+    tg_api_url = _normalize_tg_api_url(os.getenv('TG_API_URL', ''))
     builder = Application.builder().token(api_token)
     if tg_api_url:
-        base = tg_api_url.rstrip('/')
+        base = tg_api_url
         builder = builder.base_url(f'{base}/bot').base_file_url(f'{base}/file/bot')
         logger.info(f"Using Telegram API proxy: {base}")
     elif proxy_url:

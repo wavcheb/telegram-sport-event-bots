@@ -189,6 +189,24 @@ async def sync_to_max(linked_chat_id: int, linked_message_id: str, text: str):
     return False
 
 
+def _normalize_tg_api_url(url: str) -> str:
+    """Normalize TG_API_URL (CF Worker proxy base).
+
+    Accepts the URL with or without trailing '/' or '/bot'. Requires an
+    http(s) scheme: without it (or with a wrong base) the token would be
+    glued to the host part and httpx fails with "Invalid port: '<token>'".
+    """
+    url = (url or '').strip().rstrip('/')
+    if not url:
+        return ''
+    if url.endswith('/bot'):
+        url = url[:-4].rstrip('/')
+    if not url.startswith(('http://', 'https://')):
+        logger.warning(f"TG_API_URL must start with http:// or https://, ignoring: {url}")
+        return ''
+    return url
+
+
 def _html_escape(s) -> str:
     """HTML-escape for MAX (html format)."""
     if s is None:
@@ -1108,10 +1126,10 @@ async def main():
     # Option 1: CF Worker proxy (preferred) — set TG_API_URL to worker URL
     # Option 2: SOCKS/HTTP proxy — set TELEGRAM_PROXY
     proxy_url = os.getenv('TELEGRAM_PROXY')
-    tg_api_url = os.getenv('TG_API_URL', '').strip()
+    tg_api_url = _normalize_tg_api_url(os.getenv('TG_API_URL', ''))
     builder = Application.builder().token(api_token)
     if tg_api_url:
-        base = tg_api_url.rstrip('/')
+        base = tg_api_url
         builder = builder.base_url(f'{base}/bot').base_file_url(f'{base}/file/bot')
         logger.info(f"Using Telegram API proxy: {base}")
     elif proxy_url:
