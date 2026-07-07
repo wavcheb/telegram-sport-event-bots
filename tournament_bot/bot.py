@@ -14,6 +14,7 @@ from dotenv import load_dotenv
 
 BOT_DIR = Path(__file__).resolve().parent
 load_dotenv(BOT_DIR / '.env')
+from html import escape as _html_escape
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup, ForceReply
 from telegram.ext import (
     Application,
@@ -432,7 +433,7 @@ async def receive_team_names(update: Update, context: ContextTypes.DEFAULT_TYPE)
     context.user_data['team_names'] = team_names
 
     # Show teams and ask for rounds
-    teams_list = "\n".join(f"{i}. {name}" for i, name in enumerate(team_names, 1))
+    teams_list = "\n".join(f"{i}. {_html_escape(name)}" for i, name in enumerate(team_names, 1))
 
     await update.message.reply_text(
         f"✅ <b>Команды добавлены:</b>\n"
@@ -712,10 +713,10 @@ async def handle_match_button(update: Update, context: ContextTypes.DEFAULT_TYPE
     # There is no user message to reply to (button press), so we mention
     # the user in the text — that's what makes selective ForceReply target them.
     user = query.from_user
-    user_mention = f'<a href="tg://user?id={user.id}">{user.first_name}</a>'
+    user_mention = f'<a href="tg://user?id={user.id}">{_html_escape(user.first_name or "игрок")}</a>'
     await query.message.reply_text(
         f"⚽ <b>Матч #{match_num}</b>\n\n"
-        f"<b>{team1_name}</b> vs <b>{team2_name}</b>\n\n"
+        f"<b>{_html_escape(team1_name)}</b> vs <b>{_html_escape(team2_name)}</b>\n\n"
         f"{user_mention}, введите счет матча в формате:\n"
         f"• <code>3:1</code>\n"
         f"• <code>3-1</code>\n"
@@ -1112,10 +1113,17 @@ async def main():
     # Initialize database
     db.init_database()
 
-    # Configure proxy if set (for regions where Telegram is blocked)
+    # Configure Telegram API access for blocked regions:
+    # Option 1: CF Worker proxy (preferred) — set TG_API_URL to worker URL
+    # Option 2: SOCKS/HTTP proxy — set TELEGRAM_PROXY
     proxy_url = os.getenv('TELEGRAM_PROXY')
+    tg_api_url = os.getenv('TG_API_URL', '').strip()
     builder = Application.builder().token(api_token)
-    if proxy_url:
+    if tg_api_url:
+        base = tg_api_url.rstrip('/')
+        builder = builder.base_url(f'{base}/bot').base_file_url(f'{base}/file/bot')
+        logger.info(f"Using Telegram API proxy: {base}")
+    elif proxy_url:
         logger.info(f"Using proxy: {proxy_url.split('@')[-1] if '@' in proxy_url else proxy_url}")
         builder = builder.proxy(proxy_url).get_updates_proxy(proxy_url)
     application = builder.build()

@@ -527,9 +527,9 @@ async def create_new_event(update, context):
             except:
                 continue
     event_datetime = parse_datetime(event_text, translate)
-    message_text = translate("New event created") + ":\n\n🎉<b> " + event_text + " </b>🎉"
+    message_text = translate("New event created") + ":\n\n🎉<b> " + _html_escape(event_text) + " </b>🎉"
     if payment_url:
-        message_text += f'\n\n<a href="{payment_url}">{translate("💳 Payment link")}</a>'
+        message_text += f'\n\n<a href="{_html_escape(payment_url)}">{translate("💳 Payment link")}</a>'
     if not message_text.strip():
         message_text = " "
     new_message = await context.bot.send_message(
@@ -588,7 +588,7 @@ def create_event_full_text(this_chat_id: int, translate: Callable[[str], str],
     def _wrap_closed(s: str) -> str:
         return f'<s>{s}</s>' if closed else s
 
-    event_title = db.get_event_text(this_chat_id) or ""
+    event_title = _html_escape(db.get_event_text(this_chat_id) or "")
     if closed:
         text = f'🎉"<s><b>{event_title}</b></s>"🎉  🔒 <i>{translate("Event closed")}</i>\n'
     else:
@@ -611,7 +611,7 @@ def create_event_full_text(this_chat_id: int, translate: Callable[[str], str],
     # Payment links above players list
     links = []
     if payment_url:
-        links.append(f'<a href="{payment_url}">{translate("💳 Payment link")}</a>')
+        links.append(f'<a href="{_html_escape(payment_url)}">{translate("💳 Payment link")}</a>')
     # Use PAYMENTS_PAGE_URL if configured, otherwise fall back to Telegraph
     if PAYMENTS_PAGE_URL:
         try:
@@ -621,7 +621,7 @@ def create_event_full_text(this_chat_id: int, translate: Callable[[str], str],
         except:
             pass
     elif telegraph_url:
-        links.append(f'<a href="{telegraph_url}">{translate("Current payments")}</a>')
+        links.append(f'<a href="{_html_escape(telegraph_url)}">{translate("Current payments")}</a>')
     if links:
         text += ' | '.join(links) + '\n\n'
 
@@ -642,7 +642,7 @@ def create_event_full_text(this_chat_id: int, translate: Callable[[str], str],
         if players_limit and n == players_limit + 1:
             text_players += '\t\t\n' + translate('Reserve') + ':\n'
         in_squad = '➕' if not players_limit or n <= players_limit else '      '
-        printable_name = db.compose_full_name(user_id)
+        printable_name = _html_escape(db.compose_full_name(user_id))
         games_registered, penalties = db.get_chat_user_rp(this_chat_id, user_id)
         paid = db.get_payment_status(this_chat_id, user_id)
         payment_emoji = '💰' if paid else ''
@@ -657,8 +657,8 @@ def create_event_full_text(this_chat_id: int, translate: Callable[[str], str],
             if players_limit and n == players_limit + 1:
                 text_players += '\t\t\n' + translate('Reserve') + ':\n'
             in_squad = '➕' if not players_limit or n <= players_limit else '      '
-            platform_mark = f' [{platform}]'
-            text_players += in_squad + f'{n}. {_wrap_closed(name + platform_mark)}\n'
+            platform_mark = f' [{_html_escape(platform)}]'
+            text_players += in_squad + f'{n}. {_wrap_closed(_html_escape(name) + platform_mark)}\n'
 
     text += '\n' + text_players
     total_players = len(players) + len(linked_players)
@@ -669,7 +669,7 @@ def create_event_full_text(this_chat_id: int, translate: Callable[[str], str],
             cancel_datetime = db.get_user_cancellation_datetime(this_chat_id, canceled_user_id)
             cd = _coerce_to_datetime(cancel_datetime)
             cd_txt = cd.strftime('%Y-%m-%d %H:%M') if cd else str(cancel_datetime)[:16]
-            printable_name = db.compose_full_name(canceled_user_id)
+            printable_name = _html_escape(db.compose_full_name(canceled_user_id))
             text += f'      <s>{printable_name} - {cd_txt}</s>\n'
     elif total_players == 0:
         text += '\n' + translate('No applications yet')
@@ -754,7 +754,7 @@ async def legioneer_added_message(update, context):
     translate = context.user_data['translate']
     user_id = update.message.from_user.id if update.message else update.callback_query.from_user.id
     chat_id = update.message.chat_id if update.message else update.callback_query.message.chat_id
-    full_name = db.compose_full_name(user_id)
+    full_name = _html_escape(db.compose_full_name(user_id))
     if db.get_event_text(chat_id):
         legion_text = translate('Guest player applied by %(full_name)s') % {'full_name': full_name}
         await context.bot.send_message(chat_id, legion_text, parse_mode=ParseMode.HTML)
@@ -765,7 +765,7 @@ async def legioneer_removed_message(update, context):
     translate = context.user_data['translate']
     user_id = update.message.from_user.id if update.message else update.callback_query.from_user.id
     chat_id = update.message.chat_id if update.message else update.callback_query.message.chat_id
-    full_name = db.compose_full_name(user_id)
+    full_name = _html_escape(db.compose_full_name(user_id))
     event_id = db.get_event_id_by_chat_id(chat_id)
     if event_id and db.get_legioneer_user(event_id) > 9 and db.get_event_text(chat_id):
         legion_text = translate('Guest player was revoked by %(full_name)s') % {'full_name': full_name}
@@ -806,7 +806,7 @@ async def penalty_player(update, context):
 
     try:
         db.penalty_for_user_in_chat(update.message.chat_id, user_id_int, update.message.from_user.id)
-        full_name = db.compose_full_name(user_id_int)
+        full_name = _html_escape(db.compose_full_name(user_id_int))
         penalty_text = translate('The player %(full_name)s was handed a yellow card for non-appearance') % {'full_name': full_name}
         await context.bot.send_message(update.message.chat_id, penalty_text, parse_mode=ParseMode.HTML)
         logger.info(f"Penalty applied to user {user_id_int} in chat {update.message.chat_id}")
@@ -830,7 +830,7 @@ async def fix_squad(update, context):
         if not players_limit or position <= players_limit:
             try:
                 squad.append(userid)
-                full_name = db.compose_full_name(userid)
+                full_name = _html_escape(db.compose_full_name(userid))
                 games, penalties = db.get_chat_user_rp(this_chat_id, userid)
                 games += 1
                 text += f"{full_name} {games}/{penalties}\n"
@@ -878,7 +878,7 @@ async def show_stat(update, context):
     for userid in all_userids:
         if userid < 30:
             continue
-        printable_name = db.compose_full_name(userid)
+        printable_name = _html_escape(db.compose_full_name(userid))
         registered, penalties = db.get_chat_user_rp(update.message.chat_id, userid)
         text += f"ID:{userid}, {registered:>2}/{penalties}, Full Name: {printable_name}\n"
     text += '</code>'
@@ -914,7 +914,7 @@ async def show_payments(update, context):
             return
         lines = [f'💰 <b>{translate("Payment log")}:</b>\n']
         for user_id, paid_at, for_friend in entries:
-            name = db.compose_full_name(user_id)
+            name = _html_escape(db.compose_full_name(user_id))
             time_str = paid_at.strftime('%H:%M') if isinstance(paid_at, datetime.datetime) else str(paid_at)[:5]
             note = f' ({translate("probably for friend")})' if for_friend else f' ({translate("probably for self")})'
             lines.append(f'• <b>{name}</b> {translate("marked payment at")} {time_str}{note}')

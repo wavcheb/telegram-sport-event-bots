@@ -108,6 +108,13 @@ def parse_datetime(str_datetime_in_free_form: str) -> Optional[datetime.datetime
     return found_date
 
 
+def _redact_token(s: str) -> str:
+    """Remove bot token from error/log strings (requests exceptions include the URL)."""
+    if TG_BOT_TOKEN:
+        s = s.replace(TG_BOT_TOKEN, '***')
+    return s
+
+
 def _tg_request_sync(url: str, data: dict) -> Optional[bytes]:
     """Synchronous POST to Telegram API with optional proxy support.
     Uses `requests` when available (SOCKS via PySocks), otherwise urllib.
@@ -126,7 +133,7 @@ def _tg_request_sync(url: str, data: dict) -> Optional[bytes]:
     except ImportError:
         pass
     except Exception as e:
-        logger.warning(f"Telegram sync (requests) failed: {e}")
+        logger.warning(f"Telegram sync (requests) failed: {_redact_token(str(e))}")
         return None
 
     # Fallback: urllib with HTTP/HTTPS proxy only (no SOCKS)
@@ -153,7 +160,7 @@ def _tg_request_sync(url: str, data: dict) -> Optional[bytes]:
             body = ''
         logger.warning(f"Telegram sync HTTP error: {e.code} {e.reason} {body}")
     except Exception as e:
-        logger.warning(f"Telegram sync (urllib) failed: {e}")
+        logger.warning(f"Telegram sync (urllib) failed: {_redact_token(str(e))}")
     return None
 
 
