@@ -5,6 +5,7 @@ Round-Robin algorithm, standings calculation, formatting
 """
 
 import re
+from html import escape as _html_escape
 from typing import List, Tuple, Optional
 from loguru import logger
 
@@ -129,11 +130,11 @@ def format_standings_table(standings: List[Tuple], include_position: bool = True
         medal_lines = []
         for position, row in enumerate(standings[:3], start=1):
             if position == 1:
-                medal_lines.append(f"🥇 {row[1]}")
+                medal_lines.append(f"🥇 {_html_escape(row[1])}")
             elif position == 2:
-                medal_lines.append(f"🥈 {row[1]}")
+                medal_lines.append(f"🥈 {_html_escape(row[1])}")
             elif position == 3:
-                medal_lines.append(f"🥉 {row[1]}")
+                medal_lines.append(f"🥉 {_html_escape(row[1])}")
         if medal_lines:
             lines.append("<i>" + " • ".join(medal_lines) + "</i>")
 
@@ -173,6 +174,8 @@ def format_standings_table(standings: List[Tuple], include_position: bool = True
         else:
             # Pad short names to max_name_len to ensure proper alignment
             name = name.ljust(max_name_len)
+        # Escape AFTER padding: entities render as one char, so width is kept
+        name = _html_escape(name)
 
         # Format goal difference with sign
         gd_str = f"{gd:+4d}" if gd != 0 else "  0 "
@@ -285,7 +288,7 @@ def format_tournament_summary(tournament_info: dict, standings: List[Tuple]) -> 
     # Winner
     if standings:
         winner = standings[0]
-        lines.append(f"\n🏆 <b>ПОБЕДИТЕЛЬ: {winner[1]}</b>")
+        lines.append(f"\n🏆 <b>ПОБЕДИТЕЛЬ: {_html_escape(winner[1])}</b>")
         lines.append(f"<i>Очки: {winner[9]} | Голы: {winner[6]}-{winner[7]}</i>")
 
     return "\n".join(lines)

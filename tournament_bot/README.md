@@ -42,9 +42,10 @@ python3 -m tournament_bot.db_tournament
 
 ### 2. Configure Environment
 
-Edit `.env` file in project root:
+Create `.env` file inside the `tournament_bot/` directory:
 
 ```bash
+cd tournament_bot
 cp .env.example .env
 nano .env
 ```
@@ -68,7 +69,7 @@ chmod 600 .env
 ### 3. Run the Bot
 
 ```bash
-./run_tournament_bot.sh
+./run.sh
 ```
 
 Or directly with Python:
@@ -175,9 +176,9 @@ User: /stopnow
 Bot: ⚠️ Внимание!
      Команды сыграли разное количество матчей
      ...
-     Подтвердите: /stopnow confirm
+     [✅ Подтвердить] [❌ Отмена]  (inline buttons)
 
-User: /stopnow confirm
+User: *clicks ✅ Подтвердить*
 Bot: 🏆 ТУРНИР ЗАВЕРШЕН!
      [Shows final standings]
 ```
@@ -247,17 +248,20 @@ Tournament creation uses ConversationHandler:
 ### Project Structure
 
 ```
-telegram-sport-event-bots/
+tournament_bot/              # Self-contained Tournament Bot
+├── __init__.py             # Package initialization
+├── bot.py                  # Main bot with handlers
+├── db_tournament.py        # Database operations
+├── tournament_logic.py     # Tournament algorithms
 ├── .env.example            # Environment config template
 ├── .env                    # Your config (create from template)
-├── tournament_bot/         # Tournament Bot module
-│   ├── __init__.py         # Package initialization
-│   ├── bot.py              # Main bot with handlers
-│   ├── db_tournament.py    # Database operations
-│   ├── tournament_logic.py # Tournament algorithms
-│   └── logs/               # Log files
-├── run_tournament_bot.sh   # Startup script
-└── README_TOURNAMENT.md    # This file
+├── requirements.txt        # Python dependencies
+├── run.sh                  # Run script
+├── setup_venv.sh           # Virtual environment setup
+├── tournament-bot.service       # Systemd system service
+├── tournament-bot-user.service  # Systemd user service
+├── logs/                   # Log files (created at runtime)
+└── README.md               # This file
 ```
 
 ### Adding New Features
@@ -273,7 +277,7 @@ telegram-sport-event-bots/
 python3 -m tournament_bot.db_tournament
 
 # Run bot
-./run_tournament_bot.sh
+./run.sh
 
 # Test in Telegram:
 /start
@@ -284,7 +288,7 @@ python3 -m tournament_bot.db_tournament
 ## 🐛 Troubleshooting
 
 ### Bot doesn't start
-- Check `.env` has `TOURNAMENT_BOT_TOKEN` or `TELEGRAM_BOT_TOKEN` set
+- Check `tournament_bot/.env` has `TOURNAMENT_BOT_TOKEN` or `TELEGRAM_BOT_TOKEN` set
 - Verify Python version: `python --version` (need 3.11+)
 - Check logs: `tail -f tournament_bot/logs/tournament_bot.log`
 

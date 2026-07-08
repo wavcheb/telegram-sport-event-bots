@@ -10,10 +10,12 @@ Telegram bot for organizing sports events (any game such as football, volleyball
 - **Guest Players**: Add legionnaire/guest players who aren't in the chat
 - **Payment Tracking**: Track who has paid with 💰 emoji indicator
 - **Payment Link**: Embed payment URL in event - shown as inline button
-- **Payment Log**: Auto-published to Telegraph page, updated after each payment
+- **Payment Log**: Auto-published to Telegraph page, updated after each payment (or to your own page via `PAYMENTS_PAGE_URL`)
 - **Attendance Statistics**: Track registrations and penalties for no-shows
 - **Multi-language Support**: Russian, Ukrainian, Portuguese, Arabic, and English
 - **Interactive Buttons**: Inline keyboard for quick actions
+- **Cross-Platform MAX Sync**: Link chats with MAX Sport Event Bot (`/link`, `/unlink`); set `MAX_BOT_TOKEN` in `.env` for real-time updates of linked MAX chat messages
+- **Blocked Regions Support**: Access Telegram API via a Cloudflare Worker proxy (`TG_API_URL`) or a SOCKS/HTTP proxy (`TELEGRAM_PROXY`)
 
 ## 📋 Requirements
 
@@ -32,13 +34,17 @@ cd telegram-sport-event-bots
 
 ### 2. Install Dependencies
 
+The easiest way — use the setup script (creates a virtual environment and installs everything):
+
 ```bash
-pip install -r requirements.txt
+cd sport_event_bot
+./setup_venv.sh
 ```
 
-Or using virtual environment:
+Or manually:
 
 ```bash
+cd sport_event_bot
 python3 -m venv venv
 source venv/bin/activate  # On Windows: venv\Scripts\activate
 pip install -r requirements.txt
@@ -61,9 +67,10 @@ The bot will automatically create tables on first run.
 
 ### 4. Configure Environment
 
-Create `.env` file from template:
+Create `.env` file from template inside the `sport_event_bot/` directory:
 
 ```bash
+cd sport_event_bot   # if not already there
 cp .env.example .env
 nano .env
 ```
@@ -91,7 +98,7 @@ chmod 600 .env
 ### 5. Run the Bot
 
 ```bash
-./run_sport_event_bot.sh
+./run.sh
 ```
 
 Or directly with Python:
@@ -155,9 +162,14 @@ This creates an event with description "Football Saturday 18:00" and shows a �
 - `/info` - Show current event details
 - `/help` - Show list of available commands
 
+### Cross-Platform Chat Linking
+
+- `/link` - Link this Telegram chat with a MAX Messenger chat (generates a secret code to enter in the MAX bot)
+- `/unlink` - Unlink the chat
+
 ## 🗄️ Database Schema
 
-The bot uses MySQL with 5 main tables:
+The bot uses MySQL with 9 tables:
 
 - **Users**: User profiles (id, first_name, last_name, username)
 - **Chats**: Chat/group information and latest bot message
@@ -165,6 +177,9 @@ The bot uses MySQL with 5 main tables:
 - **Participants**: Event registrations with payment status
 - **Revoked**: Cancelled registrations history
 - **Penalties**: Penalty tracking table
+- **PaymentLog**: Payment confirmation log
+- **ChatLinks**: Cross-platform (Telegram ↔ MAX) chat links
+- **EventLinks**: Cross-platform event links
 
 ## 🌍 Supported Languages
 
@@ -181,35 +196,27 @@ Language is detected automatically from user's Telegram settings.
 ### Project Structure
 
 ```
-telegram-sport-event-bots/
-├── sport_event_bot/          # Sport Event Bot module
-│   ├── __init__.py          # Package initialization
-│   ├── bot.py               # Main bot logic and handlers
-│   ├── db_mysql.py          # Database operations
-│   ├── telegraph.py         # Telegraph API for payment logs
+sport_event_bot/              # Self-contained Sport Event Bot
+├── __init__.py              # Package initialization
+├── bot.py                   # Main bot logic and handlers
+├── db_mysql.py              # Database operations
+├── telegraph.py             # Telegraph API for payment logs
 ├── .env.example             # Environment config template
 ├── .env                     # Your config (create from .env.example)
-│   ├── babel.cfg            # Babel configuration for i18n
-│   ├── messages.pot         # Translation template
-│   ├── locale/              # Translation files
-│   │   ├── ar/             # Arabic translations
-│   │   ├── pt/             # Portuguese translations
-│   │   ├── ru/             # Russian translations
-│   │   └── ua/             # Ukrainian translations
-│   └── logs/                # Log files
-├── tournament_bot/           # Tournament Bot module
-│   ├── __init__.py          # Package initialization
-│   ├── bot.py               # Main bot logic
-│   ├── db_tournament.py     # Database operations
-│   ├── tournament_logic.py  # Tournament algorithms
-├── .env.example             # Environment config template
-├── .env                     # Your config (create from .env.example)
-│   └── logs/                # Log files
-├── run_sport_event_bot.sh   # Sport Event Bot startup script
-├── run_tournament_bot.sh    # Tournament Bot startup script
-├── requirements.txt          # Python dependencies
-├── README.md                # Sport Event Bot documentation
-└── README_TOURNAMENT.md     # Tournament Bot documentation
+├── requirements.txt         # Python dependencies
+├── run.sh                   # Run script
+├── setup_venv.sh            # Virtual environment setup
+├── sport-event-bot.service       # Systemd system service
+├── sport-event-bot-user.service  # Systemd user service
+├── babel.cfg                # Babel configuration for i18n
+├── messages.pot             # Translation template
+├── locale/                  # Translation files
+│   ├── ar/                 # Arabic translations
+│   ├── pt/                 # Portuguese translations
+│   ├── ru/                 # Russian translations
+│   └── uk/                 # Ukrainian translations
+├── logs/                    # Log files (created at runtime)
+└── README.md                # This file
 ```
 
 ### Adding New Translations
@@ -240,13 +247,13 @@ pybabel compile -d locale
 
 - Check if bot is running: `ps aux | grep sport_event_bot`
 - Check logs: `tail -f sport_event_bot/logs/logs.log`
-- Verify bot token is correct in `sport_event_bot/token.txt`
+- Verify bot token is correct in `sport_event_bot/.env` (`TELEGRAM_BOT_TOKEN`); `token.txt` is a legacy fallback used only when the env variable is not set
 - Ensure bot is added to the group and has admin rights
 
 ### Database connection errors
 
 - Verify MySQL is running: `systemctl status mysql`
-- Check credentials in `sport_event_bot/db_mysql.py`
+- Check credentials in `sport_event_bot/.env`
 - Ensure database and user exist
 - Test connection: `mysql -u futsal_bot -p futsal_bot`
 

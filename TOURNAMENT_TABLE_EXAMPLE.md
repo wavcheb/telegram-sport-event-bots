@@ -88,7 +88,7 @@ To test the new format:
 ```bash
 cd /usr/local/tgbot
 git pull
-./run_tournament_bot.sh
+cd tournament_bot && ./run.sh
 ```
 
 In Telegram:
