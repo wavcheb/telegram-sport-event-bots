@@ -40,9 +40,55 @@ from maxapi.types import (
     BotStarted,
     Command,
     CallbackButton,
+    BotCommand,
 )
 from maxapi.utils.inline_keyboard import InlineKeyboardBuilder
 from maxapi.enums import ParseMode
+
+
+# Commands advertised to MAX clients, so typing "/" offers suggestions.
+# MAX accepts at most 32.
+BOT_COMMANDS = [
+    ('event_add', 'Создать новое событие'),
+    ('event_remove', 'Закрыть текущее событие'),
+    ('event_update', 'Изменить описание события'),
+    ('event_datetime', 'Установить дату и время события'),
+    ('limit', 'Установить лимит игроков'),
+    ('info', 'Показать событие с кнопками'),
+    ('add', 'Записаться на событие'),
+    ('remove', 'Отписаться от события'),
+    ('add_leg', 'Добавить друга/легионера'),
+    ('rem_leg', 'Убрать последнего легионера'),
+    ('pay', 'Подтвердить оплату'),
+    ('payments', 'Показать лог оплат'),
+    ('event_duty', 'Выбрать дежурного на событие'),
+    ('mepls', 'Вызваться дежурить самому'),
+    ('duty_stats', 'Статистика дежурств'),
+    ('fix', 'Зафиксировать состав и статистику'),
+    ('penalty', 'Добавить штраф за неявку'),
+    ('stat', 'Статистика участников чата'),
+    ('link', 'Связать чат с Telegram'),
+    ('unlink', 'Разорвать связь с другим чатом'),
+    ('event_copy', 'Скопировать событие из связанного чата'),
+    ('help', 'Список команд'),
+]
+
+
+async def register_bot_commands(bot_instance) -> None:
+    """Publish the command list so MAX can autocomplete it for users."""
+    commands = [BotCommand(name=name, description=desc) for name, desc in BOT_COMMANDS]
+    try:
+        await bot_instance.set_commands(*commands)
+        logger.info(f"Registered {len(commands)} bot commands in MAX")
+    except AttributeError:
+        # maxapi < 1.2.2 only has the deprecated PATCH /me variant
+        try:
+            await bot_instance.set_my_commands(*commands)
+            logger.info(f"Registered {len(commands)} bot commands in MAX (legacy API)")
+        except Exception as e:
+            logger.warning(f"Could not register bot commands: {e}")
+    except Exception as e:
+        logger.warning(f"Could not register bot commands: {e}")
 
 
 def _escape_html(s: str) -> str:
@@ -559,6 +605,9 @@ async def cmd_help(event: MessageCreated):
 
 /mepls
 Вызваться дежурить самому
+
+/duty_stats
+Статистика дежурств: кто сколько раз дежурил и кто ещё ни разу
 """
     await event.message.answer(help_text)
 
@@ -1191,6 +1240,58 @@ async def cmd_mepls(event: MessageCreated):
     await _announce_duty(event, user.user_id, db.PLATFORM, name, volunteered=True)
 
 
+def _plural_times(n: int) -> str:
+    """Russian plural for 'раз': 1 раз, 2 раза, 5 раз, 11 раз."""
+    if 11 <= (n % 100) <= 14:
+        return 'раз'
+    last = n % 10
+    if last == 1:
+        return 'раз'
+    if 2 <= last <= 4:
+        return 'раза'
+    return 'раз'
+
+
+@dp.message_created(Command('duty_stats'))
+async def cmd_duty_stats(event: MessageCreated):
+    """Show how many times each player has been on duty."""
+    chat_id = event.chat.chat_id
+    new_chat_id_memoization(chat_id)
+
+    stats = db.get_duty_stats(chat_id)
+    duty_now = db.get_event_duty(chat_id)
+
+    lines = ['🧹 <b>Статистика дежурств</b>\n']
+    if stats:
+        for user_id, platform, name, count in stats:
+            mark = '' if platform == db.PLATFORM else f' [{_escape_html(platform)}]'
+            current = ' ← сейчас' if duty_now and (user_id, platform) == (duty_now[0], duty_now[1]) else ''
+            lines.append(f'{_escape_html(name)}{mark} — {count} {_plural_times(count)}{current}')
+    else:
+        lines.append('<i>Дежурств ещё не было.</i>')
+
+    # Participants of the open event who have never been on duty are the
+    # ones /event_duty will pick from next.
+    try:
+        served = {(uid, plat) for uid, plat, _, _ in stats}
+        never = [
+            (name, plat) for uid, plat, name in db.get_duty_candidates(chat_id)
+            if (uid, plat) not in served
+        ]
+        if never:
+            lines.append('\n<b>Ещё не дежурили</b> (из записавшихся):')
+            for name, plat in never:
+                mark = '' if plat == db.PLATFORM else f' [{_escape_html(plat)}]'
+                lines.append(f'{_escape_html(name)}{mark}')
+    except Exception as e:
+        logger.warning(f"Could not list never-on-duty players: {e}")
+
+    await event.bot.send_message(
+        chat_id=chat_id, text='\n'.join(lines),
+        format=ParseMode.HTML, disable_link_preview=True
+    )
+
+
 @dp.message_callback()
 async def handle_callback(event: MessageCallback):
     """Handle inline button callbacks.
@@ -1345,6 +1446,9 @@ async def main():
 
     # Initialize database tables
     db.init_database()
+
+    # Publish the command list for client-side autocomplete
+    await register_bot_commands(bot)
 
     # Webhook configuration (set MAX_WEBHOOK_URL to enable webhook mode)
     webhook_url = os.getenv('MAX_WEBHOOK_URL', '').strip()

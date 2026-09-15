@@ -170,6 +170,11 @@ The duty player washes the bibs and plays for free.
   has the fewest past duties is picked (at random among ties). Guests and
   legioneers (synthetic ids below 100) are never picked.
 - `/mepls` - Volunteer yourself for duty instead of the assigned player.
+- `/duty_stats` - Who has been on duty how many times, who is on duty now, and
+  which registered players never have (those are what `/event_duty` picks from).
+
+Duty is always assigned explicitly — chats that don't do duty simply never use
+these commands.
 
 The duty player is marked 🧹 in the event announcement and gets a green
 "Дежурный" badge on the payments page, counting as settled up.

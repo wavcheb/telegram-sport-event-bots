@@ -1201,6 +1201,48 @@ async def volunteer_duty(update, context):
 
 @logger.catch
 @make_translatable_user_id_context
+async def show_duty_stats(update, context):
+    """Show how many times each player has been on duty (/duty_stats)."""
+    translate = context.user_data['translate']
+    this_chat_id = update.message.chat_id
+    new_chat_id_memoization(this_chat_id, update.message.from_user.language_code)
+
+    stats = db.get_duty_stats(this_chat_id)
+    duty_now = db.get_event_duty(this_chat_id)
+
+    lines = [f'🧹 <b>{translate("Duty statistics")}</b>\n']
+    if stats:
+        for user_id, platform, name, count in stats:
+            mark = '' if platform == db.PLATFORM else f' [{_html_escape(platform)}]'
+            current = f' ← {translate("current")}' if duty_now and (user_id, platform) == (duty_now[0], duty_now[1]) else ''
+            lines.append(f'{_html_escape(name)}{mark} — {count}{current}')
+    else:
+        lines.append(f'<i>{translate("Nobody has been on duty yet.")}</i>')
+
+    # Participants of the open event who have never been on duty are the
+    # ones /event_duty will pick from next.
+    try:
+        served = {(uid, plat) for uid, plat, _, _ in stats}
+        never = [
+            (name, plat) for uid, plat, name in db.get_duty_candidates(this_chat_id)
+            if (uid, plat) not in served
+        ]
+        if never:
+            lines.append(f'\n<b>{translate("Never on duty")}</b> ({translate("among registered")}):')
+            for name, plat in never:
+                mark = '' if plat == db.PLATFORM else f' [{_html_escape(plat)}]'
+                lines.append(f'{_html_escape(name)}{mark}')
+    except Exception as e:
+        logger.warning(f"Could not list never-on-duty players: {e}")
+
+    await context.bot.send_message(
+        this_chat_id, '\n'.join(lines),
+        parse_mode=ParseMode.HTML, disable_web_page_preview=True
+    )
+
+
+@logger.catch
+@make_translatable_user_id_context
 async def show_help(update, context):
     translate = context.user_data['translate']
     new_chat_id_memoization(update.message.chat_id, update.message.from_user.language_code)
@@ -1271,6 +1313,9 @@ Pick the duty player for this event: the one with the fewest past duties
 
 /mepls
 Volunteer yourself for duty instead.
+
+/duty_stats
+Duty statistics: how many times each player has been on duty, and who never has.
 """)
     await context.bot.send_message(update.message.chat_id, event_text, parse_mode=ParseMode.HTML)
 
@@ -1370,6 +1415,7 @@ async def main():
     application.add_handler(CommandHandler('event_copy', copy_event_from_linked))
     application.add_handler(CommandHandler('event_duty', assign_duty))
     application.add_handler(CommandHandler('mepls', volunteer_duty))
+    application.add_handler(CommandHandler('duty_stats', show_duty_stats))
     application.add_handler(CallbackQueryHandler(button))
     application.add_handler(MessageHandler(filters.TEXT | filters.StatusUpdate.NEW_CHAT_MEMBERS, unknown_command_handler))
 
