@@ -343,3 +343,43 @@ msgstr "из записавшихся"
 #: bot.py
 msgid "No active event in the linked chat"
 msgstr "В связанном чате нет активного события"
+
+#: bot.py
+msgid "This code is unknown or already used."
+msgstr "Этот код неизвестен или уже использован."
+
+#: bot.py
+msgid "Accounts linked"
+msgstr "Аккаунты связаны"
+
+#: bot.py
+msgid "Duty history now counts as one person."
+msgstr "История дежурств теперь общая."
+
+#: bot.py
+msgid "Your account is linked with"
+msgstr "Ваш аккаунт связан с"
+
+#: bot.py
+msgid "Use /iam_forget to unlink."
+msgstr "Разорвать связь: /iam_forget"
+
+#: bot.py
+msgid "Your linking code"
+msgstr "Ваш код для связки аккаунтов"
+
+#: bot.py
+msgid "Send \"/iam CODE\" in the other messenger from your own account."
+msgstr "Отправьте \"/iam КОД\" в другом мессенджере со своего аккаунта."
+
+#: bot.py
+msgid "Anyone who enters this code will be linked to you, so do not share it."
+msgstr "Кто введёт этот код, тот и будет связан с вами — не передавайте его."
+
+#: bot.py
+msgid "Accounts unlinked."
+msgstr "Связь аккаунтов разорвана."
+
+#: bot.py
+msgid "Your account is not linked to another one."
+msgstr "Ваш аккаунт не связан с другим."

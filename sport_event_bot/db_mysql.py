@@ -881,6 +881,155 @@ def get_linked_event_users(event_id: int) -> List[Tuple[int, str, str]]:
         result.append((user_id, platform, name))
     return result
 
+# ==================== Cross-platform identity ====================
+
+# One human may hold an account in each messenger. Duty history must follow
+# the person, not the account, so accounts are grouped under a person key.
+# An unlinked account is its own person: "<platform>:<user_id>".
+
+
+def create_table_user_links():
+    """Accounts grouped into one person, plus the pending invite codes."""
+    conn = reconnect()
+    _exec(conn, '''
+        CREATE TABLE IF NOT EXISTS UserLinks (
+            link_id BIGINT NOT NULL AUTO_INCREMENT,
+            person_key VARCHAR(64) NOT NULL,
+            user_id BIGINT NOT NULL,
+            platform VARCHAR(16) NOT NULL,
+            created_at DATETIME NOT NULL,
+            PRIMARY KEY (link_id),
+            UNIQUE KEY uq_user_account (user_id, platform),
+            KEY idx_person_key (person_key)
+        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+    ''')
+    _exec(conn, '''
+        CREATE TABLE IF NOT EXISTS UserLinkCodes (
+            code_id BIGINT NOT NULL AUTO_INCREMENT,
+            link_secret VARCHAR(32) NOT NULL,
+            user_id BIGINT NOT NULL,
+            platform VARCHAR(16) NOT NULL,
+            created_at DATETIME NOT NULL,
+            used_at DATETIME DEFAULT NULL,
+            PRIMARY KEY (code_id),
+            UNIQUE KEY uq_user_link_secret (link_secret),
+            KEY idx_code_account (user_id, platform)
+        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+    ''')
+    conn.commit()
+    conn.close()
+
+
+def get_person_key(user_id: int, platform: str = None) -> str:
+    """Identity key spanning this human's accounts. Unlinked accounts get
+    their own key, so callers can always group by it."""
+    platform = platform or PLATFORM
+    conn = reconnect()
+    cur = _exec(conn, '''
+        SELECT person_key FROM UserLinks WHERE user_id = %s AND platform = %s LIMIT 1;
+    ''', (user_id, platform))
+    row = cur.fetchone()
+    conn.close()
+    return row[0] if row else f'{platform}:{user_id}'
+
+
+def get_person_accounts(person_key: str) -> List[Tuple[int, str]]:
+    """Every account belonging to this person: [(user_id, platform), ...]."""
+    conn = reconnect()
+    cur = _exec(conn, '''
+        SELECT user_id, platform FROM UserLinks WHERE person_key = %s;
+    ''', (person_key,))
+    rows = cur.fetchall() or []
+    conn.close()
+    if rows:
+        return [(int(r[0]), r[1]) for r in rows]
+    # Unlinked: the key encodes the single account it stands for
+    platform, _, raw_id = person_key.partition(':')
+    try:
+        return [(int(raw_id), platform)]
+    except ValueError:
+        return []
+
+
+def create_identity_code(user_id: int, platform: str = None) -> str:
+    """Issue a code this person enters in the other messenger to link up."""
+    platform = platform or PLATFORM
+    conn = reconnect()
+    secret = generate_link_secret()
+    _exec(conn, '''
+        INSERT INTO UserLinkCodes (link_secret, user_id, platform, created_at)
+        VALUES (%s, %s, %s, %s)
+    ''', (secret, user_id, platform, datetime.datetime.now()))
+    conn.commit()
+    conn.close()
+    return secret
+
+
+def complete_identity_link(user_id: int, secret: str,
+                           platform: str = None) -> Optional[Tuple[int, str]]:
+    """Redeem a code, merging both accounts into one person.
+
+    Returns the other (user_id, platform), or None when the code is unknown,
+    already used, or would link an account to itself/the same platform."""
+    platform = platform or PLATFORM
+    conn = reconnect()
+    cur = _exec(conn, '''
+        SELECT code_id, user_id, platform FROM UserLinkCodes
+        WHERE link_secret = %s AND used_at IS NULL LIMIT 1
+    ''', (secret.strip().upper(),))
+    row = cur.fetchone()
+    if not row:
+        conn.close()
+        return None
+
+    code_id, other_user_id, other_platform = int(row[0]), int(row[1]), row[2]
+    if other_platform == platform and other_user_id == user_id:
+        conn.close()
+        return None
+
+    # Reuse whichever side already has a person key so previously merged
+    # accounts stay together; otherwise start a key from the inviting account.
+    cur = _exec(conn, '''
+        SELECT person_key FROM UserLinks
+        WHERE (user_id = %s AND platform = %s) OR (user_id = %s AND platform = %s)
+        LIMIT 1
+    ''', (other_user_id, other_platform, user_id, platform))
+    existing = cur.fetchone()
+    person_key = existing[0] if existing else f'{other_platform}:{other_user_id}'
+
+    now = datetime.datetime.now()
+    for uid, plat in ((other_user_id, other_platform), (user_id, platform)):
+        _exec(conn, '''
+            INSERT INTO UserLinks (person_key, user_id, platform, created_at)
+            VALUES (%s, %s, %s, %s)
+            ON DUPLICATE KEY UPDATE person_key = VALUES(person_key);
+        ''', (person_key, uid, plat, now))
+    _exec(conn, 'UPDATE UserLinkCodes SET used_at = %s WHERE code_id = %s', (now, code_id))
+    conn.commit()
+    conn.close()
+    return (other_user_id, other_platform)
+
+
+def unlink_identity(user_id: int, platform: str = None) -> bool:
+    """Detach this account from its person, making it its own person again."""
+    platform = platform or PLATFORM
+    conn = reconnect()
+    cur = _exec(conn, 'DELETE FROM UserLinks WHERE user_id = %s AND platform = %s',
+                (user_id, platform))
+    removed = cur.rowcount > 0
+    conn.commit()
+    conn.close()
+    return removed
+
+
+def get_linked_identity(user_id: int, platform: str = None) -> List[Tuple[int, str]]:
+    """This person's accounts on OTHER platforms (empty when unlinked)."""
+    platform = platform or PLATFORM
+    key = get_person_key(user_id, platform)
+    return [(uid, plat) for uid, plat in get_person_accounts(key)
+            if (uid, plat) != (user_id, platform)]
+
+
 # ==================== Duty roster (дежурный) ====================
 
 # Guests and legioneers are stored under small synthetic user ids; real
@@ -959,14 +1108,23 @@ def set_event_duty(chat_id: int, user_id: int, platform: str, assigned_by: str =
 
 
 def get_duty_count(chat_id: int, user_id: int, platform: str) -> int:
-    """How many times this user has been on duty in this chat (and its link)."""
+    """Past duties of the PERSON behind this account, in this chat and its
+    link. Someone who signed up in MAX last time and in Telegram this time is
+    the same person, so both accounts' duties count together."""
     chats = _duty_chat_scope(chat_id)
-    placeholders = ','.join(['%s'] * len(chats))
+    accounts = get_person_accounts(get_person_key(user_id, platform))
+    if not accounts:
+        return 0
+    chat_ph = ','.join(['%s'] * len(chats))
+    acct_ph = ','.join(['(%s,%s)'] * len(accounts))
+    params = list(chats)
+    for uid, plat in accounts:
+        params += [uid, plat]
     conn = reconnect()
     cur = _exec(conn, f'''
         SELECT COUNT(*) FROM Duty
-        WHERE chat_id IN ({placeholders}) AND user_id = %s AND platform = %s;
-    ''', tuple(chats + [user_id, platform]))
+        WHERE chat_id IN ({chat_ph}) AND (user_id, platform) IN ({acct_ph});
+    ''', tuple(params))
     row = cur.fetchone()
     conn.close()
     return int(row[0]) if row else 0
@@ -974,16 +1132,30 @@ def get_duty_count(chat_id: int, user_id: int, platform: str) -> int:
 
 def get_duty_candidates(chat_id: int) -> List[Tuple[int, str, str]]:
     """Real participants of the open event: [(user_id, platform, name)].
-    Guests and legioneers never take duty, so they are filtered out."""
+
+    Guests and legioneers never take duty, so they are filtered out. Accounts
+    of the same person are collapsed into one candidate, so being signed up on
+    both platforms does not double someone's chance of being picked."""
     candidates = []
+    seen_persons = set()
+
+    def add(user_id, platform, name):
+        if user_id < REAL_USER_ID_MIN:
+            return
+        key = get_person_key(user_id, platform)
+        if key in seen_persons:
+            return
+        seen_persons.add(key)
+        candidates.append((user_id, platform, name))
+
+    # Local accounts first, so a person present on both platforms is mentioned
+    # in the chat where the command was typed.
     for user_id in get_event_users(chat_id):
-        if user_id >= REAL_USER_ID_MIN:
-            candidates.append((user_id, PLATFORM, compose_full_name(user_id)))
+        add(user_id, PLATFORM, compose_full_name(user_id))
     event_id = get_event_id_by_chat_id(chat_id)
     if event_id:
         for user_id, platform, name in get_linked_event_users(event_id):
-            if user_id >= REAL_USER_ID_MIN:
-                candidates.append((user_id, platform, name))
+            add(user_id, platform, name)
     return candidates
 
 
@@ -999,6 +1171,13 @@ def choose_duty(chat_id: int) -> Optional[Tuple[int, str, str]]:
     fewest = min(row[0] for row in counted)
     pool = [(uid, plat, name) for count, uid, plat, name in counted if count == fewest]
     return random.choice(pool)
+
+
+def is_same_person(user_id_1: int, platform_1: str, user_id_2: int, platform_2: str) -> bool:
+    """Whether two accounts belong to the same human."""
+    if (user_id_1, platform_1) == (user_id_2, platform_2):
+        return True
+    return get_person_key(user_id_1, platform_1) == get_person_key(user_id_2, platform_2)
 
 
 def get_duty_display_name(user_id: int, platform: str) -> str:
@@ -1019,21 +1198,38 @@ def get_duty_display_name(user_id: int, platform: str) -> str:
 
 
 def get_duty_stats(chat_id: int) -> List[Tuple[int, str, str, int]]:
-    """Duty tally for this chat: [(user_id, platform, name, count)], busiest first."""
+    """Duty tally for this chat: [(user_id, platform, name, count)], busiest
+    first. Tallied per person, so someone's MAX and Telegram duties add up
+    into a single row."""
     chats = _duty_chat_scope(chat_id)
     placeholders = ','.join(['%s'] * len(chats))
     conn = reconnect()
     cur = _exec(conn, f'''
         SELECT user_id, platform, COUNT(*) AS cnt FROM Duty
         WHERE chat_id IN ({placeholders})
-        GROUP BY user_id, platform ORDER BY cnt DESC;
+        GROUP BY user_id, platform;
     ''', tuple(chats))
     rows = cur.fetchall() or []
     conn.close()
-    return [
-        (int(r[0]), r[1], get_duty_display_name(int(r[0]), r[1]), int(r[2]))
-        for r in rows
+
+    totals = {}
+    for raw_uid, plat, cnt in rows:
+        uid = int(raw_uid)
+        key = get_person_key(uid, plat)
+        entry = totals.get(key)
+        if entry is None:
+            totals[key] = [uid, plat, int(cnt)]
+        else:
+            entry[2] += int(cnt)
+            # Prefer showing the account on this bot's own platform
+            if entry[1] != PLATFORM and plat == PLATFORM:
+                entry[0], entry[1] = uid, plat
+    result = [
+        (uid, plat, get_duty_display_name(uid, plat), count)
+        for uid, plat, count in totals.values()
     ]
+    result.sort(key=lambda r: r[3], reverse=True)
+    return result
 
 
 def migrate_schema():
@@ -1069,6 +1265,7 @@ def init_database():
     create_table_chat_links()
     create_table_event_links()
     create_table_duty()
+    create_table_user_links()
     migrate_schema()
 
 def record_payment_log(chat_id: int, payer_user_id: int, for_friend: bool = False):
