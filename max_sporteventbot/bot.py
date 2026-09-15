@@ -40,9 +40,55 @@ from maxapi.types import (
     BotStarted,
     Command,
     CallbackButton,
+    BotCommand,
 )
 from maxapi.utils.inline_keyboard import InlineKeyboardBuilder
 from maxapi.enums import ParseMode
+
+
+# Commands advertised to MAX clients, so typing "/" offers suggestions.
+# MAX accepts at most 32.
+BOT_COMMANDS = [
+    ('event_add', 'Создать новое событие'),
+    ('event_remove', 'Закрыть текущее событие'),
+    ('event_update', 'Изменить описание события'),
+    ('event_datetime', 'Установить дату и время события'),
+    ('limit', 'Установить лимит игроков'),
+    ('info', 'Показать событие с кнопками'),
+    ('add', 'Записаться на событие'),
+    ('remove', 'Отписаться от события'),
+    ('add_leg', 'Добавить друга/легионера'),
+    ('rem_leg', 'Убрать последнего легионера'),
+    ('pay', 'Подтвердить оплату'),
+    ('payments', 'Показать лог оплат'),
+    ('event_duty', 'Выбрать дежурного на событие'),
+    ('mepls', 'Вызваться дежурить самому'),
+    ('duty_stats', 'Статистика дежурств'),
+    ('fix', 'Зафиксировать состав и статистику'),
+    ('penalty', 'Добавить штраф за неявку'),
+    ('stat', 'Статистика участников чата'),
+    ('link', 'Связать чат с Telegram'),
+    ('unlink', 'Разорвать связь с другим чатом'),
+    ('event_copy', 'Скопировать событие из связанного чата'),
+    ('help', 'Список команд'),
+]
+
+
+async def register_bot_commands(bot_instance) -> None:
+    """Publish the command list so MAX can autocomplete it for users."""
+    commands = [BotCommand(name=name, description=desc) for name, desc in BOT_COMMANDS]
+    try:
+        await bot_instance.set_commands(*commands)
+        logger.info(f"Registered {len(commands)} bot commands in MAX")
+    except AttributeError:
+        # maxapi < 1.2.2 only has the deprecated PATCH /me variant
+        try:
+            await bot_instance.set_my_commands(*commands)
+            logger.info(f"Registered {len(commands)} bot commands in MAX (legacy API)")
+        except Exception as e:
+            logger.warning(f"Could not register bot commands: {e}")
+    except Exception as e:
+        logger.warning(f"Could not register bot commands: {e}")
 
 
 def _escape_html(s: str) -> str:
@@ -174,6 +220,22 @@ def _tg_request_sync(url: str, data: dict) -> Optional[bytes]:
     except Exception as e:
         logger.warning(f"Telegram sync (urllib) failed: {_redact_token(str(e))}")
     return None
+
+
+async def send_message_to_telegram(linked_chat_id: int, text: str) -> bool:
+    """Post a new (plain announcement) message into a linked Telegram chat."""
+    if not TG_BOT_TOKEN:
+        logger.debug("TG_BOT_TOKEN not set, skipping Telegram message")
+        return False
+
+    url = f"{TG_API_BASE}/bot{TG_BOT_TOKEN}/sendMessage"
+    data = {
+        'chat_id': linked_chat_id,
+        'text': text,
+        'parse_mode': 'HTML',
+        'disable_web_page_preview': 'true',
+    }
+    return bool(await asyncio.to_thread(_tg_request_sync, url, data))
 
 
 async def sync_to_telegram(linked_chat_id: int, linked_message_id: int, text: str, keyboard_json: str = None):
@@ -390,6 +452,10 @@ def create_event_full_text(this_chat_id: int, payment_url: str = None, closed: s
     def _wrap_closed(s: str) -> str:
         return f'<s>{s}</s>' if closed else s
 
+    # Duty player (washes the bibs, plays for free) — marked with a broom
+    duty = db.get_event_duty(this_chat_id)
+    duty_key = (duty[0], duty[1]) if duty else None
+
     # Show local players
     for n, user_id in enumerate(players, start=1):
         if players_limit and n == players_limit + 1:
@@ -398,7 +464,10 @@ def create_event_full_text(this_chat_id: int, payment_url: str = None, closed: s
         printable_name = _escape_html(db.compose_full_name(user_id))
         games_registered, penalties = db.get_chat_user_rp(this_chat_id, user_id)
         paid = db.get_payment_status(this_chat_id, user_id)
-        payment_mark = ' [оплачено]' if paid else ''
+        if duty_key == (user_id, db.PLATFORM):
+            payment_mark = ' 🧹 [дежурный]'
+        else:
+            payment_mark = ' [оплачено]' if paid else ''
         name_line = player_name_with_cards(games_registered, penalties, printable_name)
         text_players += f'{in_squad} {n}. {_wrap_closed(name_line + payment_mark)}\n'
 
@@ -412,7 +481,8 @@ def create_event_full_text(this_chat_id: int, payment_url: str = None, closed: s
             in_squad = '+' if not players_limit or n <= players_limit else '  '
             safe_name = _escape_html(name)
             platform_mark = f' [{_escape_html(platform)}]'
-            text_players += f'{in_squad} {n}. {_wrap_closed(safe_name + platform_mark)}\n'
+            duty_mark = ' 🧹 [дежурный]' if duty_key == (user_id, platform) else ''
+            text_players += f'{in_squad} {n}. {_wrap_closed(safe_name + platform_mark + duty_mark)}\n'
 
     text += text_players
     total_players = len(players) + len(linked_players)
@@ -428,6 +498,9 @@ def create_event_full_text(this_chat_id: int, payment_url: str = None, closed: s
             text += f'  <s>{printable_name} - {_escape_html(cd_txt)}</s>\n'
     elif total_players == 0:
         text += '\nПока нет заявок'
+    if duty:
+        duty_name = _escape_html(db.get_duty_display_name(duty[0], duty[1]))
+        text += f'\n🧹 Дежурный: <b>{duty_name}</b> — за игру не платит\n'
     safe = text.strip()
     return safe if safe else " "
 
@@ -481,6 +554,11 @@ async def cmd_help(event: MessageCreated):
 /limit XX
 Установить лимит игроков
 
+/event_datetime ДАТА ВРЕМЯ
+Установить дату и время события в свободной форме.
+Пример 1: 2023-01-30, 18:00
+Пример 2: завтра в 14:30
+
 /info
 Показать информацию о событии
 
@@ -520,6 +598,16 @@ async def cmd_help(event: MessageCreated):
 
 /event_copy
 Скопировать событие из связанного чата
+
+/event_duty
+Выбрать дежурного на событие: из участников с наименьшим числом
+дежурств выбирается случайный. Дежурный стирает манишки и не платит за игру.
+
+/mepls
+Вызваться дежурить самому
+
+/duty_stats
+Статистика дежурств: кто сколько раз дежурил и кто ещё ни разу
 """
     await event.message.answer(help_text)
 
@@ -647,6 +735,35 @@ async def cmd_limit(event: MessageCreated):
         logger.exception(e)
 
 
+@dp.message_created(Command('event_datetime'))
+async def cmd_event_datetime(event: MessageCreated):
+    """Set event date and time from free-form text."""
+    chat_id = event.chat.chat_id
+    new_chat_id_memoization(chat_id)
+
+    if not db.get_event_text(chat_id):
+        await event.message.answer('Нет активных событий')
+        return
+
+    str_datetime = parse_cmd_arg(event.message.body.text or '')
+    if not str_datetime:
+        await event.message.answer(
+            'Укажите дату и время. Например: /event_datetime завтра в 20:00'
+        )
+        return
+
+    event_datetime = parse_datetime(str_datetime)
+    if not event_datetime:
+        await event.message.answer(
+            'Не удалось распознать дату и время. '
+            'Попробуйте иначе, например: /event_datetime завтра в 20:00'
+        )
+        return
+
+    db.set_event_datetime(chat_id, event_datetime)
+    await show_info_impl(event)
+
+
 @dp.message_created(Command('info'))
 async def cmd_info(event: MessageCreated):
     """Show event info."""
@@ -669,7 +786,9 @@ async def show_info_impl(event: MessageCreated, bot=None):
 
     _bot = bot or event.bot
 
-    # Remove buttons from old message (leave text intact)
+    # Remove buttons from old message (leave text intact).
+    # format=HTML is required: the stored text contains HTML markup, and
+    # without it MAX renders the raw tags instead of formatting them.
     old_msg_id = db.get_latest_bot_message_id(chat_id)
     old_msg_text = db.get_latest_bot_message_text(chat_id)
     if old_msg_id and old_msg_text:
@@ -678,6 +797,8 @@ async def show_info_impl(event: MessageCreated, bot=None):
                 message_id=old_msg_id,
                 text=old_msg_text,
                 attachments=[],
+                format=ParseMode.HTML,
+                disable_link_preview=True,
             )
         except Exception as e:
             logger.info(f"Could not remove buttons from old message: {e}")
@@ -1016,6 +1137,161 @@ async def cmd_event_copy(event: MessageCreated):
     db.save_latest_bot_message(chat_id, msg_id, message_text)
 
 
+# ==================== Duty roster ====================
+
+async def _announce_duty(event: MessageCreated, user_id: int, platform: str,
+                         name: str, volunteered: bool):
+    """Announce the duty in this chat and in the linked Telegram chat."""
+    chat_id = event.chat.chat_id
+    safe_name = _escape_html(name)
+    platform_mark = '' if platform == db.PLATFORM else f' [{_escape_html(platform)}]'
+    if volunteered:
+        text = (f'🧹 <b>{safe_name}</b>{platform_mark} вызвался дежурить. Спасибо!\n'
+                'Стирает манишки и за игру не платит.')
+    else:
+        text = (f'🧹 Дежурный на это событие: <b>{safe_name}</b>{platform_mark}\n'
+                'Стирает манишки и за игру не платит.')
+    await event.bot.send_message(
+        chat_id=chat_id, text=text, format=ParseMode.HTML, disable_link_preview=True
+    )
+
+    # Mirror into the linked Telegram chat. A real mention only works for
+    # Telegram users, so a MAX player is named in plain text there.
+    try:
+        linked = db.get_linked_chat(chat_id)
+        if linked and linked[1] == 'telegram':
+            if platform == 'telegram':
+                mention = f'<a href="tg://user?id={user_id}">{safe_name}</a>'
+            else:
+                mention = f'<b>{safe_name}</b> [max]'
+            await send_message_to_telegram(
+                linked[0],
+                f'🧹 Дежурный: {mention}\nСтирает манишки и за игру не платит.'
+            )
+    except Exception as e:
+        logger.warning(f"Failed to announce duty in linked chat: {e}")
+
+    await show_info_impl(event)
+
+
+@dp.message_created(Command('event_duty'))
+async def cmd_event_duty(event: MessageCreated):
+    """Pick the duty player for the open event."""
+    chat_id = event.chat.chat_id
+    new_chat_id_memoization(chat_id)
+
+    if not db.get_event_text(chat_id):
+        await event.message.answer('Нет активных событий')
+        return
+
+    # Keep an existing duty unless that player has left the event since
+    existing = db.get_event_duty(chat_id)
+    if existing:
+        still_playing = any(
+            (uid, plat) == (existing[0], existing[1])
+            for uid, plat, _ in db.get_duty_candidates(chat_id)
+        )
+        if still_playing:
+            name = db.get_duty_display_name(existing[0], existing[1])
+            await event.message.answer(
+                f'🧹 Дежурный уже назначен: {name}\n'
+                'Подменить его можно командой /mepls'
+            )
+            return
+        logger.info(f"Duty {existing[0]}@{existing[1]} left event in chat {chat_id}, re-picking")
+
+    choice = db.choose_duty(chat_id)
+    if not choice:
+        await event.message.answer(
+            'Нет подходящих участников для дежурства (гости и легионеры не считаются).'
+        )
+        return
+
+    user_id, platform, name = choice
+    db.set_event_duty(chat_id, user_id, platform, 'auto')
+    logger.info(f"Duty assigned: {user_id}@{platform} in chat {chat_id}")
+    await _announce_duty(event, user_id, platform, name, volunteered=False)
+
+
+@dp.message_created(Command('mepls'))
+async def cmd_mepls(event: MessageCreated):
+    """Volunteer yourself for duty."""
+    chat_id = event.chat.chat_id
+    user = event.message.sender
+    new_chat_id_memoization(chat_id)
+
+    if not db.get_event_text(chat_id):
+        await event.message.answer('Нет активных событий')
+        return
+
+    db.add_or_update_user(user.user_id, user.first_name or '', user.last_name or '', user.username or '')
+    if user.user_id not in (db.get_event_users(chat_id) or []):
+        await event.message.answer('Сначала запишитесь на событие, потом вызывайтесь дежурить.')
+        return
+
+    existing = db.get_event_duty(chat_id)
+    if existing and existing[0] == user.user_id and existing[1] == db.PLATFORM:
+        await event.message.answer('Вы уже дежурный на этом событии.')
+        return
+
+    db.set_event_duty(chat_id, user.user_id, db.PLATFORM, 'volunteer')
+    name = db.compose_full_name(user.user_id)
+    logger.info(f"Duty volunteered: {user.user_id} in chat {chat_id}")
+    await _announce_duty(event, user.user_id, db.PLATFORM, name, volunteered=True)
+
+
+def _plural_times(n: int) -> str:
+    """Russian plural for 'раз': 1 раз, 2 раза, 5 раз, 11 раз."""
+    if 11 <= (n % 100) <= 14:
+        return 'раз'
+    last = n % 10
+    if last == 1:
+        return 'раз'
+    if 2 <= last <= 4:
+        return 'раза'
+    return 'раз'
+
+
+@dp.message_created(Command('duty_stats'))
+async def cmd_duty_stats(event: MessageCreated):
+    """Show how many times each player has been on duty."""
+    chat_id = event.chat.chat_id
+    new_chat_id_memoization(chat_id)
+
+    stats = db.get_duty_stats(chat_id)
+    duty_now = db.get_event_duty(chat_id)
+
+    lines = ['🧹 <b>Статистика дежурств</b>\n']
+    if stats:
+        for user_id, platform, name, count in stats:
+            mark = '' if platform == db.PLATFORM else f' [{_escape_html(platform)}]'
+            current = ' ← сейчас' if duty_now and (user_id, platform) == (duty_now[0], duty_now[1]) else ''
+            lines.append(f'{_escape_html(name)}{mark} — {count} {_plural_times(count)}{current}')
+    else:
+        lines.append('<i>Дежурств ещё не было.</i>')
+
+    # Participants of the open event who have never been on duty are the
+    # ones /event_duty will pick from next.
+    try:
+        served = {(uid, plat) for uid, plat, _, _ in stats}
+        never = [
+            (name, plat) for uid, plat, name in db.get_duty_candidates(chat_id)
+            if (uid, plat) not in served
+        ]
+        if never:
+            lines.append('\n<b>Ещё не дежурили</b> (из записавшихся):')
+            for name, plat in never:
+                mark = '' if plat == db.PLATFORM else f' [{_escape_html(plat)}]'
+                lines.append(f'{_escape_html(name)}{mark}')
+    except Exception as e:
+        logger.warning(f"Could not list never-on-duty players: {e}")
+
+    await event.bot.send_message(
+        chat_id=chat_id, text='\n'.join(lines),
+        format=ParseMode.HTML, disable_link_preview=True
+    )
+
+
 @dp.message_callback()
 async def handle_callback(event: MessageCallback):
     """Handle inline button callbacks.
@@ -1031,7 +1307,8 @@ async def handle_callback(event: MessageCallback):
 
     logger.info(f"Callback: chat_id={chat_id}, user={user.user_id}, action={callback_data}")
 
-    notification = None  # toast popup text
+    notification = None  # toast popup text (seen only by the presser)
+    chat_message = None  # message posted to the chat (seen by everyone)
 
     try:
         db.add_or_update_user(user.user_id, user.first_name or '', user.last_name or '', user.username or '')
@@ -1044,11 +1321,13 @@ async def handle_callback(event: MessageCallback):
             db.revoke_application_for_the_event(chat_id, user.user_id)
             notification = f'{full_name} отписался'
         elif callback_data == "ADD_LEGIONEER":
+            # Who brought a guest is relevant to the whole chat, not just the
+            # presser, so announce it in the chat (same as the Telegram bot).
             db.apply_for_legioneer(chat_id, user.user_id)
-            notification = f'Гость добавлен ({full_name})'
+            chat_message = f'Гость добавлен пользователем {_escape_html(full_name)}'
         elif callback_data == "REMOVE_LEGIONEER":
             db.revoke_for_legioneer(chat_id)
-            notification = f'Гость удалён ({full_name})'
+            chat_message = f'Гость удалён пользователем {_escape_html(full_name)}'
         elif callback_data == "PAY":
             result = db.process_payment(chat_id, user.user_id)
             msg_map = {
@@ -1092,6 +1371,18 @@ async def handle_callback(event: MessageCallback):
         )
         msg_id = sent_msg.message.body.mid if sent_msg and sent_msg.message else ""
         db.save_latest_bot_message(chat_id, msg_id, safe_text)
+
+    # Announcements meant for the whole chat (guest added/removed)
+    if chat_message:
+        try:
+            await event.bot.send_message(
+                chat_id=chat_id,
+                text=chat_message,
+                format=ParseMode.HTML,
+                disable_link_preview=True,
+            )
+        except Exception as e:
+            logger.warning(f"Failed to post chat message: {e}")
 
     # Cross-platform sync: update linked Telegram chat
     try:
@@ -1155,6 +1446,9 @@ async def main():
 
     # Initialize database tables
     db.init_database()
+
+    # Publish the command list for client-side autocomplete
+    await register_bot_commands(bot)
 
     # Webhook configuration (set MAX_WEBHOOK_URL to enable webhook mode)
     webhook_url = os.getenv('MAX_WEBHOOK_URL', '').strip()

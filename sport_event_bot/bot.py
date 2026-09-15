@@ -145,6 +145,34 @@ MAX_EVENT_KEYBOARD_ATTACHMENT = {
 }
 
 
+async def send_message_to_max(linked_chat_id: int, text: str) -> bool:
+    """Post a new (plain announcement) message into a linked MAX chat."""
+    if not MAX_BOT_TOKEN:
+        logger.debug("MAX_BOT_TOKEN not set, skipping MAX message")
+        return False
+
+    def do_request():
+        try:
+            url = f"https://platform-api.max.ru/messages?chat_id={linked_chat_id}"
+            data = json.dumps({'text': text, 'format': 'html'}, ensure_ascii=False).encode('utf-8')
+            req = urllib.request.Request(url, data=data, method='POST')
+            req.add_header('Content-Type', 'application/json; charset=utf-8')
+            req.add_header('Authorization', MAX_BOT_TOKEN)
+            with urllib.request.urlopen(req, timeout=10) as resp:
+                return resp.read()
+        except urllib.error.HTTPError as e:
+            try:
+                body = e.read().decode('utf-8', errors='replace')[:300]
+            except Exception:
+                body = ''
+            logger.warning(f"MAX message HTTP error: {e.code} {e.reason} {body}")
+        except Exception as e:
+            logger.warning(f"MAX message failed: {e}")
+        return None
+
+    return bool(await asyncio.to_thread(do_request))
+
+
 async def sync_to_max(linked_chat_id: int, linked_message_id: str, text: str):
     """Update message in linked MAX chat (HTML formatted, preserving buttons)."""
     if not MAX_BOT_TOKEN:
@@ -655,6 +683,10 @@ def create_event_full_text(this_chat_id: int, translate: Callable[[str], str],
     except:
         pass
 
+    # Duty player (washes the bibs, plays for free) — marked with a broom
+    duty = db.get_event_duty(this_chat_id)
+    duty_key = (duty[0], duty[1]) if duty else None
+
     # Show local players
     for n, user_id in enumerate(players, start=1):
         if players_limit and n == players_limit + 1:
@@ -663,7 +695,8 @@ def create_event_full_text(this_chat_id: int, translate: Callable[[str], str],
         printable_name = _html_escape(db.compose_full_name(user_id))
         games_registered, penalties = db.get_chat_user_rp(this_chat_id, user_id)
         paid = db.get_payment_status(this_chat_id, user_id)
-        payment_emoji = '💰' if paid else ''
+        is_duty = duty_key == (user_id, db.PLATFORM)
+        payment_emoji = '🧹' if is_duty else ('💰' if paid else '')
         name_with_cards = player_name_with_cards(games_registered, penalties, printable_name, translate)
         text_players += in_squad + f'{n}. {_wrap_closed(name_with_cards + " " + payment_emoji)}\n'
 
@@ -676,7 +709,8 @@ def create_event_full_text(this_chat_id: int, translate: Callable[[str], str],
                 text_players += '\t\t\n' + translate('Reserve') + ':\n'
             in_squad = '➕' if not players_limit or n <= players_limit else '      '
             platform_mark = f' [{_html_escape(platform)}]'
-            text_players += in_squad + f'{n}. {_wrap_closed(_html_escape(name) + platform_mark)}\n'
+            duty_emoji = ' 🧹' if duty_key == (user_id, platform) else ''
+            text_players += in_squad + f'{n}. {_wrap_closed(_html_escape(name) + platform_mark + duty_emoji)}\n'
 
     text += '\n' + text_players
     total_players = len(players) + len(linked_players)
@@ -691,6 +725,9 @@ def create_event_full_text(this_chat_id: int, translate: Callable[[str], str],
             text += f'      <s>{printable_name} - {cd_txt}</s>\n'
     elif total_players == 0:
         text += '\n' + translate('No applications yet')
+    if duty:
+        duty_name = _html_escape(db.get_duty_display_name(duty[0], duty[1]))
+        text += f'\n🧹 {translate("On duty")}: <b>{duty_name}</b> — {translate("plays for free")}\n'
     safe = text.strip()
     return safe if safe else " "
 
@@ -1003,6 +1040,209 @@ async def unlink_chat(update, context):
 
 @logger.catch
 @make_translatable_user_id_context
+async def copy_event_from_linked(update, context):
+    """Copy the open event from the linked chat into this one (/event_copy)."""
+    translate = context.user_data['translate']
+    this_chat_id = update.message.chat_id
+    new_chat_id_memoization(this_chat_id, update.message.from_user.language_code)
+
+    linked = db.get_linked_chat(this_chat_id)
+    if not linked:
+        await update.message.reply_text(
+            f'{translate("This chat is not linked to any other chat.")} /link'
+        )
+        return
+    linked_chat_id, linked_platform = linked
+
+    if db.get_event_text(this_chat_id):
+        await update.message.reply_text(
+            translate('Error: An active event already exists. Close it with /event_remove first.')
+        )
+        return
+
+    linked_event = db.get_event_from_linked_chat(linked_chat_id, linked_platform)
+    if not linked_event:
+        await update.message.reply_text(
+            f'{translate("No active event in the linked chat")} ({linked_platform}).'
+        )
+        return
+
+    linked_event_id, description, event_datetime_str, players_limit, payment_url = linked_event
+    event_dt = _coerce_to_datetime(event_datetime_str) or datetime.datetime.now()
+
+    db.event_add(this_chat_id, description, event_dt, players_limit or 0, 0, '')
+    if payment_url:
+        db.set_event_payment_url(this_chat_id, payment_url)
+
+    local_event_id = db.get_event_id_by_chat_id(this_chat_id)
+    db.create_event_link(linked_event_id, local_event_id)
+
+    event_text = create_event_full_text(
+        this_chat_id, translate, payment_url, None
+    ).strip() or " "
+    new_message = await context.bot.send_message(
+        this_chat_id, event_text,
+        reply_markup=build_message_markup(translate),
+        parse_mode=ParseMode.HTML, disable_web_page_preview=True
+    )
+    db.save_latest_bot_message(this_chat_id, new_message.message_id, event_text)
+    logger.info(f"Event copied from {linked_platform} chat {linked_chat_id} to {this_chat_id}")
+
+
+# ==================== Duty roster ====================
+
+def _duty_mention(user_id: int, platform: str, name: str) -> str:
+    """Mention the duty player. A real Telegram mention only works for
+    Telegram users; a MAX user is named in plain text."""
+    safe_name = _html_escape(name)
+    if platform == db.PLATFORM:
+        return f'<a href="tg://user?id={user_id}">{safe_name}</a>'
+    return f'<b>{safe_name}</b> [{_html_escape(platform)}]'
+
+
+async def _announce_duty(update, context, translate, user_id, platform, name, volunteered):
+    """Announce the duty in this chat and in the linked chat, then refresh info."""
+    this_chat_id = update.message.chat_id
+    mention = _duty_mention(user_id, platform, name)
+    if volunteered:
+        text = (f'🧹 {mention} ' + translate('volunteered for duty. Thanks!') + '\n'
+                + translate('Washes the bibs and plays for free.'))
+    else:
+        text = (f'🧹 ' + translate('On duty for this event') + f': {mention}\n'
+                + translate('Washes the bibs and plays for free.'))
+    await context.bot.send_message(this_chat_id, text, parse_mode=ParseMode.HTML)
+
+    # Mirror the announcement into the linked MAX chat, if any
+    try:
+        linked = db.get_linked_chat(this_chat_id)
+        if linked and linked[1] == 'max':
+            plain = (f'🧹 Дежурный: <b>{_html_escape(name)}</b>'
+                     + ('' if platform == 'max' else ' [telegram]')
+                     + '\nСтирает манишки и за игру не платит.')
+            await send_message_to_max(linked[0], plain)
+    except Exception as e:
+        logger.warning(f"Failed to announce duty in linked chat: {e}")
+
+    await show_info(update, context)
+
+
+@logger.catch
+@make_translatable_user_id_context
+async def assign_duty(update, context):
+    """Pick the duty player for the open event (/event_duty)."""
+    translate = context.user_data['translate']
+    this_chat_id = update.message.chat_id
+    new_chat_id_memoization(this_chat_id, update.message.from_user.language_code)
+
+    if not db.get_event_text(this_chat_id):
+        await update.message.reply_text(translate('No active event found.'))
+        return
+
+    # Keep an existing duty unless that player has left the event since
+    existing = db.get_event_duty(this_chat_id)
+    if existing:
+        still_playing = any(
+            (uid, plat) == (existing[0], existing[1])
+            for uid, plat, _ in db.get_duty_candidates(this_chat_id)
+        )
+        if still_playing:
+            name = _html_escape(db.get_duty_display_name(existing[0], existing[1]))
+            await update.message.reply_text(
+                f'🧹 {translate("Duty is already assigned")}: <b>{name}</b>\n'
+                + translate('Someone else can take over with /mepls'),
+                parse_mode=ParseMode.HTML
+            )
+            return
+        logger.info(f"Duty {existing[0]}@{existing[1]} left event in chat {this_chat_id}, re-picking")
+
+    choice = db.choose_duty(this_chat_id)
+    if not choice:
+        await update.message.reply_text(
+            translate('No eligible participants for duty yet (guests do not count).')
+        )
+        return
+
+    user_id, platform, name = choice
+    db.set_event_duty(this_chat_id, user_id, platform, 'auto')
+    logger.info(f"Duty assigned: {user_id}@{platform} in chat {this_chat_id}")
+    await _announce_duty(update, context, translate, user_id, platform, name, volunteered=False)
+
+
+@logger.catch
+@make_translatable_user_id_context
+async def volunteer_duty(update, context):
+    """Volunteer yourself for duty (/mepls)."""
+    translate = context.user_data['translate']
+    this_chat_id = update.message.chat_id
+    user = update.message.from_user
+    new_chat_id_memoization(this_chat_id, user.language_code)
+
+    if not db.get_event_text(this_chat_id):
+        await update.message.reply_text(translate('No active event found.'))
+        return
+
+    db.add_or_update_user(user.id, user.first_name, user.last_name, user.username)
+    if user.id not in (db.get_event_users(this_chat_id) or []):
+        await update.message.reply_text(
+            translate('Register for the event first, then volunteer for duty.')
+        )
+        return
+
+    existing = db.get_event_duty(this_chat_id)
+    if existing and existing[0] == user.id and existing[1] == db.PLATFORM:
+        await update.message.reply_text(translate('You are already on duty for this event.'))
+        return
+
+    db.set_event_duty(this_chat_id, user.id, db.PLATFORM, 'volunteer')
+    name = db.compose_full_name(user.id)
+    logger.info(f"Duty volunteered: {user.id} in chat {this_chat_id}")
+    await _announce_duty(update, context, translate, user.id, db.PLATFORM, name, volunteered=True)
+
+
+@logger.catch
+@make_translatable_user_id_context
+async def show_duty_stats(update, context):
+    """Show how many times each player has been on duty (/duty_stats)."""
+    translate = context.user_data['translate']
+    this_chat_id = update.message.chat_id
+    new_chat_id_memoization(this_chat_id, update.message.from_user.language_code)
+
+    stats = db.get_duty_stats(this_chat_id)
+    duty_now = db.get_event_duty(this_chat_id)
+
+    lines = [f'🧹 <b>{translate("Duty statistics")}</b>\n']
+    if stats:
+        for user_id, platform, name, count in stats:
+            mark = '' if platform == db.PLATFORM else f' [{_html_escape(platform)}]'
+            current = f' ← {translate("current")}' if duty_now and (user_id, platform) == (duty_now[0], duty_now[1]) else ''
+            lines.append(f'{_html_escape(name)}{mark} — {count}{current}')
+    else:
+        lines.append(f'<i>{translate("Nobody has been on duty yet.")}</i>')
+
+    # Participants of the open event who have never been on duty are the
+    # ones /event_duty will pick from next.
+    try:
+        served = {(uid, plat) for uid, plat, _, _ in stats}
+        never = [
+            (name, plat) for uid, plat, name in db.get_duty_candidates(this_chat_id)
+            if (uid, plat) not in served
+        ]
+        if never:
+            lines.append(f'\n<b>{translate("Never on duty")}</b> ({translate("among registered")}):')
+            for name, plat in never:
+                mark = '' if plat == db.PLATFORM else f' [{_html_escape(plat)}]'
+                lines.append(f'{_html_escape(name)}{mark}')
+    except Exception as e:
+        logger.warning(f"Could not list never-on-duty players: {e}")
+
+    await context.bot.send_message(
+        this_chat_id, '\n'.join(lines),
+        parse_mode=ParseMode.HTML, disable_web_page_preview=True
+    )
+
+
+@logger.catch
+@make_translatable_user_id_context
 async def show_help(update, context):
     translate = context.user_data['translate']
     new_chat_id_memoization(update.message.chat_id, update.message.from_user.language_code)
@@ -1063,6 +1303,19 @@ With CODE - completes linking with chat that generated the code.
 
 /unlink
 Remove link with another messenger chat.
+
+/event_copy
+Copy the open event from the linked messenger chat into this one.
+
+/event_duty
+Pick the duty player for this event: the one with the fewest past duties
+(picked at random among ties). The duty player washes the bibs and plays for free.
+
+/mepls
+Volunteer yourself for duty instead.
+
+/duty_stats
+Duty statistics: how many times each player has been on duty, and who never has.
 """)
     await context.bot.send_message(update.message.chat_id, event_text, parse_mode=ParseMode.HTML)
 
@@ -1159,6 +1412,10 @@ async def main():
     application.add_handler(CommandHandler('payments', show_payments))
     application.add_handler(CommandHandler('link', link_chat))
     application.add_handler(CommandHandler('unlink', unlink_chat))
+    application.add_handler(CommandHandler('event_copy', copy_event_from_linked))
+    application.add_handler(CommandHandler('event_duty', assign_duty))
+    application.add_handler(CommandHandler('mepls', volunteer_duty))
+    application.add_handler(CommandHandler('duty_stats', show_duty_stats))
     application.add_handler(CallbackQueryHandler(button))
     application.add_handler(MessageHandler(filters.TEXT | filters.StatusUpdate.NEW_CHAT_MEMBERS, unknown_command_handler))
 
