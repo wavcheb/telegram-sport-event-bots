@@ -5,6 +5,7 @@ Updated to support payment status for participants. Migrated from sqlite3 to MyS
 
 import os
 import sys
+import random
 import datetime
 from typing import List, Optional, Set, Tuple
 from loguru import logger
@@ -880,6 +881,161 @@ def get_linked_event_users(event_id: int) -> List[Tuple[int, str, str]]:
         result.append((user_id, platform, name))
     return result
 
+# ==================== Duty roster (дежурный) ====================
+
+# Guests and legioneers are stored under small synthetic user ids; real
+# accounts (Telegram/MAX user ids) are far above this threshold.
+REAL_USER_ID_MIN = 100
+
+
+def create_table_duty():
+    """Duty roster: who washes the bibs (and plays for free) at each event."""
+    conn = reconnect()
+    _exec(conn, '''
+        CREATE TABLE IF NOT EXISTS Duty (
+            duty_id BIGINT AUTO_INCREMENT PRIMARY KEY,
+            event_id BIGINT NOT NULL,
+            chat_id BIGINT NOT NULL,
+            user_id BIGINT NOT NULL,
+            platform VARCHAR(16) NOT NULL DEFAULT 'telegram',
+            duty_date DATETIME NOT NULL,
+            assigned_by VARCHAR(16) NOT NULL DEFAULT 'auto',
+            UNIQUE KEY uq_duty_event (event_id),
+            KEY idx_duty_user (user_id, platform),
+            KEY idx_duty_chat (chat_id, platform)
+        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+    ''')
+    conn.commit()
+    conn.close()
+
+
+def _duty_event_key(chat_id: int) -> Optional[int]:
+    """Duty is keyed by the primary event id, so two linked events
+    (Telegram + MAX) share one duty instead of picking one each."""
+    event_id = get_event_id_by_chat_id(chat_id)
+    return get_primary_event_id(event_id) if event_id else None
+
+
+def _duty_chat_scope(chat_id: int) -> List[int]:
+    """Chats whose duty history counts together: this one and its link."""
+    chats = [chat_id]
+    linked = get_linked_chat(chat_id)
+    if linked:
+        chats.append(linked[0])
+    return chats
+
+
+def get_event_duty(chat_id: int) -> Optional[Tuple[int, str, str]]:
+    """Duty of the chat's open event: (user_id, platform, assigned_by)."""
+    key = _duty_event_key(chat_id)
+    if not key:
+        return None
+    conn = reconnect()
+    cur = _exec(conn, '''
+        SELECT user_id, platform, assigned_by FROM Duty WHERE event_id = %s LIMIT 1;
+    ''', (key,))
+    row = cur.fetchone()
+    conn.close()
+    return (int(row[0]), row[1], row[2]) if row else None
+
+
+def set_event_duty(chat_id: int, user_id: int, platform: str, assigned_by: str = 'auto') -> bool:
+    """Assign duty for the chat's open event, replacing any previous one."""
+    key = _duty_event_key(chat_id)
+    if not key:
+        return False
+    conn = reconnect()
+    _exec(conn, '''
+        INSERT INTO Duty (event_id, chat_id, user_id, platform, duty_date, assigned_by)
+        VALUES (%s, %s, %s, %s, %s, %s)
+        ON DUPLICATE KEY UPDATE
+            chat_id = VALUES(chat_id), user_id = VALUES(user_id),
+            platform = VALUES(platform), duty_date = VALUES(duty_date),
+            assigned_by = VALUES(assigned_by);
+    ''', (key, chat_id, user_id, platform, datetime.datetime.now(), assigned_by))
+    conn.commit()
+    conn.close()
+    return True
+
+
+def get_duty_count(chat_id: int, user_id: int, platform: str) -> int:
+    """How many times this user has been on duty in this chat (and its link)."""
+    chats = _duty_chat_scope(chat_id)
+    placeholders = ','.join(['%s'] * len(chats))
+    conn = reconnect()
+    cur = _exec(conn, f'''
+        SELECT COUNT(*) FROM Duty
+        WHERE chat_id IN ({placeholders}) AND user_id = %s AND platform = %s;
+    ''', tuple(chats + [user_id, platform]))
+    row = cur.fetchone()
+    conn.close()
+    return int(row[0]) if row else 0
+
+
+def get_duty_candidates(chat_id: int) -> List[Tuple[int, str, str]]:
+    """Real participants of the open event: [(user_id, platform, name)].
+    Guests and legioneers never take duty, so they are filtered out."""
+    candidates = []
+    for user_id in get_event_users(chat_id):
+        if user_id >= REAL_USER_ID_MIN:
+            candidates.append((user_id, PLATFORM, compose_full_name(user_id)))
+    event_id = get_event_id_by_chat_id(chat_id)
+    if event_id:
+        for user_id, platform, name in get_linked_event_users(event_id):
+            if user_id >= REAL_USER_ID_MIN:
+                candidates.append((user_id, platform, name))
+    return candidates
+
+
+def choose_duty(chat_id: int) -> Optional[Tuple[int, str, str]]:
+    """Pick the next duty: fewest past duties, ties broken at random."""
+    candidates = get_duty_candidates(chat_id)
+    if not candidates:
+        return None
+    counted = [
+        (get_duty_count(chat_id, user_id, platform), user_id, platform, name)
+        for user_id, platform, name in candidates
+    ]
+    fewest = min(row[0] for row in counted)
+    pool = [(uid, plat, name) for count, uid, plat, name in counted if count == fewest]
+    return random.choice(pool)
+
+
+def get_duty_display_name(user_id: int, platform: str) -> str:
+    """Display name for a duty user on either platform."""
+    if platform == PLATFORM:
+        return compose_full_name(user_id)
+    conn = reconnect()
+    cur = _exec(conn, '''
+        SELECT first_name, last_name, username FROM Users
+        WHERE user_id = %s AND platform = %s LIMIT 1;
+    ''', (user_id, platform))
+    row = cur.fetchone()
+    conn.close()
+    if not row:
+        return str(user_id)
+    name = " ".join([row[0] or '', row[1] or '']).strip()
+    return name or (row[2] or str(user_id))
+
+
+def get_duty_stats(chat_id: int) -> List[Tuple[int, str, str, int]]:
+    """Duty tally for this chat: [(user_id, platform, name, count)], busiest first."""
+    chats = _duty_chat_scope(chat_id)
+    placeholders = ','.join(['%s'] * len(chats))
+    conn = reconnect()
+    cur = _exec(conn, f'''
+        SELECT user_id, platform, COUNT(*) AS cnt FROM Duty
+        WHERE chat_id IN ({placeholders})
+        GROUP BY user_id, platform ORDER BY cnt DESC;
+    ''', tuple(chats))
+    rows = cur.fetchall() or []
+    conn.close()
+    return [
+        (int(r[0]), r[1], get_duty_display_name(int(r[0]), r[1]), int(r[2]))
+        for r in rows
+    ]
+
+
 def migrate_schema():
     """Add new columns to existing tables if they don't exist yet."""
     conn = reconnect()
@@ -912,6 +1068,7 @@ def init_database():
     create_table_payment_log()
     create_table_chat_links()
     create_table_event_links()
+    create_table_duty()
     migrate_schema()
 
 def record_payment_log(chat_id: int, payer_user_id: int, for_friend: bool = False):

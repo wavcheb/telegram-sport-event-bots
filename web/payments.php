@@ -95,6 +95,27 @@ $stmt = $pdo->prepare("
 $stmt->execute($all_event_ids);
 $participants = $stmt->fetchAll(PDO::FETCH_ASSOC);
 
+// Duty player (washes the bibs, plays for free). Stored once per event
+// chain, so look it up across all linked event ids.
+$duty_keys = [];
+try {
+    $stmt = $pdo->prepare("SELECT user_id, platform FROM Duty WHERE event_id IN ($placeholders)");
+    $stmt->execute($all_event_ids);
+    while ($row = $stmt->fetch(PDO::FETCH_ASSOC)) {
+        $duty_keys[$row['user_id'] . '@' . $row['platform']] = true;
+    }
+} catch (PDOException $e) {
+    // Duty table may not exist yet on older deployments — just skip the badge
+}
+
+function isOnDuty($row, $duty_keys) {
+    if (empty($row['user_id'])) {
+        return false;
+    }
+    $platform = $row['platform'] ?? 'telegram';
+    return isset($duty_keys[$row['user_id'] . '@' . $platform]);
+}
+
 // Helper function to format name
 function formatName($row, $showPlatform = false) {
     $name = trim(($row['first_name'] ?? '') . ' ' . ($row['last_name'] ?? ''));
@@ -113,9 +134,12 @@ function formatName($row, $showPlatform = false) {
     return $result;
 }
 
-// Count statistics
+// Count statistics — a duty player counts as settled up
 $total_participants = count($participants);
-$paid_count = count(array_filter($participants, fn($p) => $p['paid']));
+$paid_count = count(array_filter(
+    $participants,
+    fn($p) => $p['paid'] || isOnDuty($p, $duty_keys)
+));
 $unpaid_count = $total_participants - $paid_count;
 
 ?>
@@ -200,6 +224,7 @@ $unpaid_count = $total_participants - $paid_count;
         .badge.paid { background: #28a745; color: #fff; }
         .badge.unpaid { background: #dc3545; color: #fff; }
         .badge.friend { background: #17a2b8; color: #fff; }
+        .badge.duty { background: #1e7e34; color: #fff; }
 
         .updated {
             text-align: center;
@@ -247,16 +272,24 @@ $unpaid_count = $total_participants - $paid_count;
                 <div class="empty">Нет участников</div>
             <?php else: ?>
                 <?php foreach ($participants as $i => $p): ?>
-                    <div class="list-item <?= $p['paid'] ? 'paid' : 'unpaid' ?>">
+                    <?php
+                        $on_duty = isOnDuty($p, $duty_keys);
+                        $settled = $on_duty || $p['paid'];
+                    ?>
+                    <div class="list-item <?= $settled ? 'paid' : 'unpaid' ?>">
                         <div>
                             <span class="name"><?= ($i + 1) ?>. <?= htmlspecialchars(formatName($p, true)) ?></span>
-                            <?php if ($p['paid'] && $p['paid_at']): ?>
+                            <?php if (!$on_duty && $p['paid'] && $p['paid_at']): ?>
                                 <span class="time"><?= date('H:i', strtotime($p['paid_at'])) ?></span>
                             <?php endif; ?>
                         </div>
-                        <span class="badge <?= $p['paid'] ? 'paid' : 'unpaid' ?>">
-                            <?= $p['paid'] ? 'Оплачено' : 'Не оплачено' ?>
-                        </span>
+                        <?php if ($on_duty): ?>
+                            <span class="badge duty">🧹 Дежурный</span>
+                        <?php else: ?>
+                            <span class="badge <?= $p['paid'] ? 'paid' : 'unpaid' ?>">
+                                <?= $p['paid'] ? 'Оплачено' : 'Не оплачено' ?>
+                            </span>
+                        <?php endif; ?>
                     </div>
                 <?php endforeach; ?>
             <?php endif; ?>

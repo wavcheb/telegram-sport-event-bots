@@ -162,14 +162,30 @@ This creates an event with description "Football Saturday 18:00" and shows a �
 - `/info` - Show current event details
 - `/help` - Show list of available commands
 
+### Duty Roster
+
+The duty player washes the bibs and plays for free.
+
+- `/event_duty` - Pick the duty player: among the event's participants, whoever
+  has the fewest past duties is picked (at random among ties). Guests and
+  legioneers (synthetic ids below 100) are never picked.
+- `/mepls` - Volunteer yourself for duty instead of the assigned player.
+
+The duty player is marked 🧹 in the event announcement and gets a green
+"Дежурный" badge on the payments page, counting as settled up.
+
+Duty is shared across linked chats: a player picked in Telegram is shown in the
+linked MAX chat too, and the announcement is posted in both.
+
 ### Cross-Platform Chat Linking
 
 - `/link` - Link this Telegram chat with a MAX Messenger chat (generates a secret code to enter in the MAX bot)
 - `/unlink` - Unlink the chat
+- `/event_copy` - Copy the open event from the linked MAX chat into this one
 
 ## 🗄️ Database Schema
 
-The bot uses MySQL with 9 tables:
+The bot uses MySQL with 10 tables:
 
 - **Users**: User profiles (id, first_name, last_name, username)
 - **Chats**: Chat/group information and latest bot message
@@ -180,6 +196,7 @@ The bot uses MySQL with 9 tables:
 - **PaymentLog**: Payment confirmation log
 - **ChatLinks**: Cross-platform (Telegram ↔ MAX) chat links
 - **EventLinks**: Cross-platform event links
+- **Duty**: Duty roster — who washes the bibs (and plays free) at each event
 
 ## 🌍 Supported Languages
 

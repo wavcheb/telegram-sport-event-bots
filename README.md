@@ -37,6 +37,7 @@ Sport Event Bot (Telegram) and MAX Sport Event Bot can share a database and link
 - **Chat Linking**: Link Telegram and MAX chats with `/link` command
 - **Participant Sync**: See participants from both platforms in event messages
 - **Event Copy**: Copy events between platforms with `/event_copy`
+- **Shared Duty Roster**: `/event_duty` picks who washes the bibs (and plays for free); the pick is shared across both chats
 - **Real-Time Sync**: When participants register in one platform, the message in linked chat updates automatically (requires cross-tokens in .env)
 
 ## 🚀 Quick Start
