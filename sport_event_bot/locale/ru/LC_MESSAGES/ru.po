@@ -301,10 +301,6 @@ msgid "volunteered for duty. Thanks!"
 msgstr "вызвался дежурить. Спасибо!"
 
 #: bot.py
-msgid "Washes the bibs and plays for free."
-msgstr "Стирает манишки и за игру не платит."
-
-#: bot.py
 msgid "Duty is already assigned"
 msgstr "Дежурный уже назначен"
 

@@ -164,7 +164,7 @@ This creates an event with description "Football Saturday 18:00" and shows a �
 
 ### Duty Roster
 
-The duty player washes the bibs and plays for free.
+The duty player plays for free (whatever the chat treats duty as — washing the bibs, bringing the ball, hosting).
 
 - `/event_duty` - Pick the duty player: among the event's participants, whoever
   has the fewest past duties is picked (at random among ties). Guests and
@@ -201,7 +201,7 @@ The bot uses MySQL with 10 tables:
 - **PaymentLog**: Payment confirmation log
 - **ChatLinks**: Cross-platform (Telegram ↔ MAX) chat links
 - **EventLinks**: Cross-platform event links
-- **Duty**: Duty roster — who washes the bibs (and plays free) at each event
+- **Duty**: Duty roster — who is on duty (and plays free) at each event
 
 ## 🌍 Supported Languages
 

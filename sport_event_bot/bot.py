@@ -683,7 +683,7 @@ def create_event_full_text(this_chat_id: int, translate: Callable[[str], str],
     except:
         pass
 
-    # Duty player (washes the bibs, plays for free) — marked with a broom
+    # Duty player (plays for free) — marked with a broom
     duty = db.get_event_duty(this_chat_id)
     duty_key = (duty[0], duty[1]) if duty else None
 
@@ -1138,11 +1138,9 @@ async def _announce_duty(update, context, translate, user_id, platform, name, vo
 
     mention = _duty_mention(user_id, platform, name)
     if volunteered:
-        text = (f'🧹 {mention} ' + translate('volunteered for duty. Thanks!') + '\n'
-                + translate('Washes the bibs and plays for free.'))
+        text = f'🧹 {mention} ' + translate('volunteered for duty. Thanks!')
     else:
-        text = (f'🧹 ' + translate('On duty for this event') + f': {mention}\n'
-                + translate('Washes the bibs and plays for free.'))
+        text = '🧹 ' + translate('On duty for this event') + f': {mention}'
     await context.bot.send_message(this_chat_id, text, parse_mode=ParseMode.HTML)
 
     if not refreshed:
@@ -1162,8 +1160,7 @@ async def _announce_duty(update, context, translate, user_id, platform, name, vo
         linked = db.get_linked_chat(this_chat_id)
         if linked and linked[1] == 'max':
             plain = (f'🧹 Дежурный: <b>{_html_escape(name)}</b>'
-                     + ('' if platform == 'max' else ' [telegram]')
-                     + '\nСтирает манишки и за игру не платит.')
+                     + ('' if platform == 'max' else ' [telegram]'))
             await send_message_to_max(linked[0], plain)
     except Exception as e:
         logger.warning(f"Failed to announce duty in linked chat: {e}")
@@ -1352,7 +1349,7 @@ Copy the open event from the linked messenger chat into this one.
 
 /event_duty
 Pick the duty player for this event: the one with the fewest past duties
-(picked at random among ties). The duty player washes the bibs and plays for free.
+(picked at random among ties). The duty player plays for free.
 
 /mepls
 Volunteer yourself for duty instead.

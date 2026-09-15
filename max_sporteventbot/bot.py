@@ -466,7 +466,7 @@ def create_event_full_text(this_chat_id: int, payment_url: str = None, closed: s
     def _wrap_closed(s: str) -> str:
         return f'<s>{s}</s>' if closed else s
 
-    # Duty player (washes the bibs, plays for free) — marked with a broom
+    # Duty player (plays for free) — marked with a broom
     duty = db.get_event_duty(this_chat_id)
     duty_key = (duty[0], duty[1]) if duty else None
 
@@ -615,7 +615,7 @@ async def cmd_help(event: MessageCreated):
 
 /event_duty
 Выбрать дежурного на событие: из участников с наименьшим числом
-дежурств выбирается случайный. Дежурный стирает манишки и не платит за игру.
+дежурств выбирается случайный. Дежурный за игру не платит.
 
 /mepls
 Вызваться дежурить самому
@@ -1191,11 +1191,9 @@ async def _announce_duty(event: MessageCreated, user_id: int, platform: str,
 
     platform_mark = '' if platform == db.PLATFORM else f' [{_escape_html(platform)}]'
     if volunteered:
-        text = (f'🧹 <b>{safe_name}</b>{platform_mark} вызвался дежурить. Спасибо!\n'
-                'Стирает манишки и за игру не платит.')
+        text = f'🧹 <b>{safe_name}</b>{platform_mark} вызвался дежурить. Спасибо!'
     else:
-        text = (f'🧹 Дежурный на это событие: <b>{safe_name}</b>{platform_mark}\n'
-                'Стирает манишки и за игру не платит.')
+        text = f'🧹 Дежурный на это событие: <b>{safe_name}</b>{platform_mark}'
     await event.bot.send_message(
         chat_id=chat_id, text=text, format=ParseMode.HTML, disable_link_preview=True
     )
@@ -1222,10 +1220,7 @@ async def _announce_duty(event: MessageCreated, user_id: int, platform: str,
                 mention = f'<a href="tg://user?id={user_id}">{safe_name}</a>'
             else:
                 mention = f'<b>{safe_name}</b> [max]'
-            await send_message_to_telegram(
-                linked[0],
-                f'🧹 Дежурный: {mention}\nСтирает манишки и за игру не платит.'
-            )
+            await send_message_to_telegram(linked[0], f'🧹 Дежурный: {mention}')
     except Exception as e:
         logger.warning(f"Failed to announce duty in linked chat: {e}")
 

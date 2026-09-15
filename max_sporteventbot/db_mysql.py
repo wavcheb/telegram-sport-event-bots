@@ -888,7 +888,7 @@ REAL_USER_ID_MIN = 100
 
 
 def create_table_duty():
-    """Duty roster: who washes the bibs (and plays for free) at each event."""
+    """Duty roster: who is on duty (and plays for free) at each event."""
     conn = reconnect()
     _exec(conn, '''
         CREATE TABLE IF NOT EXISTS Duty (
