@@ -61,13 +61,11 @@ chmod +x */setup_venv.sh */run.sh
 
 # Run setup for each bot
 (cd sport_event_bot && ./setup_venv.sh)
-(cd tournament_bot && ./setup_venv.sh)
 (cd max_sporteventbot && ./setup_venv.sh)
 ```
 
 This will:
 - Create `sport_event_bot/venv/` with all dependencies
-- Create `tournament_bot/venv/` with all dependencies
 - Create `max_sporteventbot/venv/` with all dependencies
 - Install all required packages from each bot's own `requirements.txt`
 
@@ -81,7 +79,7 @@ find . -name "*.sh" -type f -exec dos2unix {} \;
 chmod +x */setup_venv.sh */run.sh
 ```
 
-### 3. Configure Databases
+### 3. Configure Database
 
 #### Sport Event Bot Database
 
@@ -118,48 +116,12 @@ Secure the file:
 chmod 600 .env
 ```
 
-#### Tournament Bot Database
-
-```bash
-mysql -u root -p
-```
-
-```sql
-CREATE DATABASE tournament_bot CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
-CREATE USER 'tournament_bot'@'localhost' IDENTIFIED BY 'YOUR_STRONG_PASSWORD';
-GRANT ALL PRIVILEGES ON tournament_bot.* TO 'tournament_bot'@'localhost';
-FLUSH PRIVILEGES;
-EXIT;
-```
-
-Tournament Bot reads configuration from its **own** `.env` file in `tournament_bot/` (not shared with Sport Event Bot):
-```bash
-cd tournament_bot
-cp .env.example .env
-nano .env
-```
-
-```
-TOURNAMENT_BOT_TOKEN=your_tournament_bot_token
-TOURNAMENT_MYSQL_DATABASE=tournament_bot
-TOURNAMENT_MYSQL_USER=tournament_bot
-TOURNAMENT_MYSQL_PASSWORD=your_password
-```
-
-Initialize database:
-```bash
-source tournament_bot/venv/bin/activate
-python -m tournament_bot.db_tournament
-deactivate
-```
-
 ### 4. Configure Bots
 
 Each bot reads configuration from the `.env` file in its **own** directory:
 
 ```bash
 cd sport_event_bot && cp .env.example .env && nano .env
-cd ../tournament_bot && cp .env.example .env && nano .env
 cd ../max_sporteventbot && cp .env.example .env && nano .env
 ```
 
@@ -198,16 +160,10 @@ INFO | Telegram Futsal Bot is starting...
 
 Press `Ctrl+C` to stop.
 
-### Test Tournament Bot
+### Test MAX Sport Event Bot
 ```bash
-cd tournament_bot
+cd max_sporteventbot
 ./run.sh
-```
-
-You should see:
-```
-Starting Tournament Bot...
-INFO | Tournament Bot starting...
 ```
 
 Press `Ctrl+C` to stop.
@@ -234,7 +190,6 @@ Ready-made user service files are shipped in each bot directory:
 
 ```bash
 cp sport_event_bot/sport-event-bot-user.service ~/.config/systemd/user/sport-event-bot.service
-cp tournament_bot/tournament-bot-user.service ~/.config/systemd/user/tournament-bot.service
 cp max_sporteventbot/max-sport-event-bot-user.service ~/.config/systemd/user/max-sport-event-bot.service
 ```
 
@@ -253,37 +208,37 @@ systemctl --user daemon-reload
 
 # Enable services (start on login)
 systemctl --user enable sport-event-bot
-systemctl --user enable tournament-bot
+systemctl --user enable max-sport-event-bot
 
 # Enable lingering (запуск сервисов даже если пользователь не залогинен)
 loginctl enable-linger $USER
 
 # Start services
 systemctl --user start sport-event-bot
-systemctl --user start tournament-bot
+systemctl --user start max-sport-event-bot
 
 # Check status
 systemctl --user status sport-event-bot
-systemctl --user status tournament-bot
+systemctl --user status max-sport-event-bot
 ```
 
 #### 4. User Service Management Commands
 ```bash
 # Start
 systemctl --user start sport-event-bot
-systemctl --user start tournament-bot
+systemctl --user start max-sport-event-bot
 
 # Stop
 systemctl --user stop sport-event-bot
-systemctl --user stop tournament-bot
+systemctl --user stop max-sport-event-bot
 
 # Restart
 systemctl --user restart sport-event-bot
-systemctl --user restart tournament-bot
+systemctl --user restart max-sport-event-bot
 
 # View logs
 journalctl --user -u sport-event-bot -f
-journalctl --user -u tournament-bot -f
+journalctl --user -u max-sport-event-bot -f
 ```
 
 **Преимущества User Services:**
@@ -304,7 +259,6 @@ Ready-made system service files are shipped in each bot directory:
 
 ```bash
 sudo cp sport_event_bot/sport-event-bot.service /etc/systemd/system/
-sudo cp tournament_bot/tournament-bot.service /etc/systemd/system/
 sudo cp max_sporteventbot/max-sport-event-bot.service /etc/systemd/system/
 ```
 
@@ -314,7 +268,6 @@ Edit the copied files: replace `YOUR_USERNAME` in `User=`/`Group=` with your act
 
 ```bash
 sudo nano /etc/systemd/system/sport-event-bot.service
-sudo nano /etc/systemd/system/tournament-bot.service
 sudo nano /etc/systemd/system/max-sport-event-bot.service
 ```
 
@@ -326,15 +279,15 @@ sudo systemctl daemon-reload
 
 # Enable services (start on boot)
 sudo systemctl enable sport-event-bot
-sudo systemctl enable tournament-bot
+sudo systemctl enable max-sport-event-bot
 
 # Start services
 sudo systemctl start sport-event-bot
-sudo systemctl start tournament-bot
+sudo systemctl start max-sport-event-bot
 
 # Check status
 sudo systemctl status sport-event-bot
-sudo systemctl status tournament-bot
+sudo systemctl status max-sport-event-bot
 ```
 
 #### 3. System Service Management Commands
@@ -342,23 +295,23 @@ sudo systemctl status tournament-bot
 ```bash
 # Start
 sudo systemctl start sport-event-bot
-sudo systemctl start tournament-bot
+sudo systemctl start max-sport-event-bot
 
 # Stop
 sudo systemctl stop sport-event-bot
-sudo systemctl stop tournament-bot
+sudo systemctl stop max-sport-event-bot
 
 # Restart
 sudo systemctl restart sport-event-bot
-sudo systemctl restart tournament-bot
+sudo systemctl restart max-sport-event-bot
 
 # View logs
 sudo journalctl -u sport-event-bot -f
-sudo journalctl -u tournament-bot -f
+sudo journalctl -u max-sport-event-bot -f
 
 # Or view bot logs directly
 tail -f sport_event_bot/logs/logs.log
-tail -f tournament_bot/logs/tournament_bot.log
+tail -f max_sporteventbot/logs/logs.log
 ```
 
 ## 🔒 Security Checklist
@@ -399,20 +352,20 @@ sudo logrotate -f /etc/logrotate.d/tgbots
 ### Check Bot Status
 ```bash
 # Check if processes are running
-ps aux | grep "sport_event_bot\|tournament_bot"
+ps aux | grep "sport_event_bot\|max_sporteventbot"
 
 # Check service status
-sudo systemctl status sport-event-bot tournament-bot
+sudo systemctl status sport-event-bot max-sport-event-bot
 
 # Check recent logs
 tail -n 50 sport_event_bot/logs/logs.log
-tail -n 50 tournament_bot/logs/tournament_bot.log
+tail -n 50 max_sporteventbot/logs/logs.log
 ```
 
 ### Monitor Resource Usage
 ```bash
 # CPU and Memory
-top -p $(pgrep -d',' -f "sport_event_bot|tournament_bot")
+top -p $(pgrep -d',' -f "sport_event_bot|max_sporteventbot")
 
 # Or use htop (install with: sudo apt install htop)
 htop
@@ -442,9 +395,9 @@ If venv creation fails:
 sudo apt install python3-venv python3-pip
 
 # Remove old venv and recreate
-rm -rf sport_event_bot/venv tournament_bot/venv
+rm -rf sport_event_bot/venv max_sporteventbot/venv
 (cd sport_event_bot && ./setup_venv.sh)
-(cd tournament_bot && ./setup_venv.sh)
+(cd max_sporteventbot && ./setup_venv.sh)
 ```
 
 ### Database Connection Issues
@@ -452,7 +405,6 @@ rm -rf sport_event_bot/venv tournament_bot/venv
 ```bash
 # Test MySQL connection
 mysql -u futsal_bot -p futsal_bot
-mysql -u tournament_bot -p tournament_bot
 
 # Check MySQL is running
 sudo systemctl status mysql
@@ -485,7 +437,7 @@ sudo chown -R $USER:$USER /usr/local/tgbot
 # Fix permissions
 chmod 755 /usr/local/tgbot
 chmod 755 /usr/local/tgbot/sport_event_bot
-chmod 755 /usr/local/tgbot/tournament_bot
+chmod 755 /usr/local/tgbot/max_sporteventbot
 chmod 600 /usr/local/tgbot/*/.env
 chmod +x /usr/local/tgbot/*/setup_venv.sh /usr/local/tgbot/*/run.sh
 ```
@@ -498,17 +450,17 @@ chmod +x /usr/local/tgbot/*/setup_venv.sh /usr/local/tgbot/*/run.sh
 cd /usr/local/tgbot
 
 # Stop services
-sudo systemctl stop sport-event-bot tournament-bot
+sudo systemctl stop sport-event-bot max-sport-event-bot
 
 # Pull updates
 git pull
 
 # Reinstall dependencies if needed (each bot has its own requirements.txt)
 cd sport_event_bot && source venv/bin/activate && pip install -r requirements.txt && deactivate
-cd ../tournament_bot && source venv/bin/activate && pip install -r requirements.txt && deactivate
+cd ../max_sporteventbot && source venv/bin/activate && pip install -r requirements.txt && deactivate
 
 # Start services
-sudo systemctl start sport-event-bot tournament-bot
+sudo systemctl start sport-event-bot max-sport-event-bot
 ```
 
 ## 📝 Backup
@@ -521,9 +473,6 @@ mkdir -p ~/backups
 
 # Backup Sport Event Bot database
 mysqldump -u futsal_bot -p futsal_bot > ~/backups/futsal_bot_$(date +%Y%m%d).sql
-
-# Backup Tournament Bot database
-mysqldump -u tournament_bot -p tournament_bot > ~/backups/tournament_bot_$(date +%Y%m%d).sql
 ```
 
 ### Automated Daily Backups
@@ -534,9 +483,8 @@ crontab -e
 
 Add:
 ```cron
-# Daily database backups at 2 AM
+# Daily database backup at 2 AM
 0 2 * * * mysqldump -u futsal_bot -pYOUR_PASSWORD futsal_bot > ~/backups/futsal_bot_$(date +\%Y\%m\%d).sql
-0 2 * * * mysqldump -u tournament_bot -pYOUR_PASSWORD tournament_bot > ~/backups/tournament_bot_$(date +\%Y\%m\%d).sql
 
 # Clean old backups (keep 30 days)
 0 3 * * * find ~/backups -name "*.sql" -mtime +30 -delete
@@ -548,4 +496,4 @@ Add:
 
 For bot-specific usage instructions, see:
 - [Sport Event Bot Documentation](sport_event_bot/README.md)
-- [Tournament Bot Documentation](tournament_bot/README.md)
+- [MAX Sport Event Bot Documentation](max_sporteventbot/README.md)

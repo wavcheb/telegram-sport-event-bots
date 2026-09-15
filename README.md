@@ -1,6 +1,6 @@
 # ⚽🏆 Sport Event Bots - Multi-Platform Sports Bots Collection
 
-A comprehensive collection of bots for managing sports events and tournaments across Telegram and MAX Messenger. Each bot is fully independent with its own configuration and can share a database for cross-platform features.
+A comprehensive collection of bots for managing sports events across Telegram and MAX Messenger. Each bot is fully independent with its own configuration and can share a database for cross-platform features.
 
 ## 📦 Available Bots
 
@@ -16,20 +16,6 @@ Use [existing bot](https://t.me/nashfootballbot) @nashfootballbot or make own se
 - Multi-language support (RU, UK, PT, AR, EN)
 
 **[📖 Full Documentation](sport_event_bot/README.md)**
-
-### 🏆 Tournament Bot
-Telegram bot for managing sports tournaments with automatic standings calculation using Round-Robin algorithm.
-Use [existing bot](https://t.me/nashtournamentbot) @nashtournamentbot or make own selfhosted bot.
-
-**Key Features:**
-- Round-Robin tournament system
-- Automatic standings calculation (3-1-0 points)
-- Multiple rounds support (1-4 rounds)
-- Interactive match entry with buttons
-- Result editing with recalculation
-- Early tournament finish option
-
-**[📖 Full Documentation](tournament_bot/README.md)**
 
 ### 📱 MAX Sport Event Bot
 MAX Messenger bot for organizing sports events. Can link with Telegram Sport Event Bot for cross-platform participant management.
@@ -74,7 +60,6 @@ Sport Event Bot (Telegram) and MAX Sport Event Bot can share a database and link
    Each bot uses its own isolated virtual environment — run the setup script inside each bot directory:
    ```bash
    cd sport_event_bot && ./setup_venv.sh
-   cd ../tournament_bot && ./setup_venv.sh
    cd ../max_sporteventbot && ./setup_venv.sh
    ```
 
@@ -84,25 +69,20 @@ Sport Event Bot (Telegram) and MAX Sport Event Bot can share a database and link
    find . -name "*.sh" -type f -exec dos2unix {} \;
    ```
 
-3. **Configure databases**
+3. **Configure the database**
 
-   Create databases:
+   Create the database:
    ```bash
    mysql -u root -p
    CREATE DATABASE futsal_bot CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
    CREATE USER 'futsal_bot'@'localhost' IDENTIFIED BY 'password';
    GRANT ALL PRIVILEGES ON futsal_bot.* TO 'futsal_bot'@'localhost';
-
-   CREATE DATABASE tournament_bot CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
-   CREATE USER 'tournament_bot'@'localhost' IDENTIFIED BY 'password';
-   GRANT ALL PRIVILEGES ON tournament_bot.* TO 'tournament_bot'@'localhost';
    ```
 
 4. **Configure environment** (each bot has its own `.env.example`)
    ```bash
    cd sport_event_bot && cp .env.example .env && nano .env
    cd ../max_sporteventbot && cp .env.example .env && nano .env
-   cd ../tournament_bot && cp .env.example .env && nano .env
    ```
 
    Secure the file:
@@ -114,9 +94,6 @@ Sport Event Bot (Telegram) and MAX Sport Event Bot can share a database and link
    ```bash
    # Run Sport Event Bot
    cd sport_event_bot && ./run.sh
-
-   # Run Tournament Bot (in another terminal)
-   cd tournament_bot && ./run.sh
 
    # Run MAX Sport Event Bot (in another terminal)
    cd max_sporteventbot && ./run.sh
@@ -142,15 +119,6 @@ telegram-sport-event-bots/
 ├── max_sporteventbot/        # MAX Sport Event Bot
 │   ├── bot.py               # Main bot logic
 │   ├── db_mysql.py          # Database operations
-│   ├── .env.example         # Environment config template
-│   ├── requirements.txt     # Python dependencies
-│   ├── run.sh               # Run script
-│   ├── setup_venv.sh        # Virtual environment setup
-│   ├── *.service            # Systemd service files
-│   └── README.md            # Bot documentation
-├── tournament_bot/           # Tournament Bot
-│   ├── bot.py               # Main bot logic
-│   ├── db_tournament.py     # Database operations
 │   ├── .env.example         # Environment config template
 │   ├── requirements.txt     # Python dependencies
 │   ├── run.sh               # Run script
@@ -210,7 +178,6 @@ If Telegram API is blocked in your region, you can use either:
 
 - **[Sport Event Bot Documentation](sport_event_bot/README.md)** - Telegram bot for event management
 - **[MAX Sport Event Bot Documentation](max_sporteventbot/README.md)** - MAX Messenger bot for events
-- **[Tournament Bot Documentation](tournament_bot/README.md)** - Tournament management
 - **[Installation Guide](INSTALL.md)** - Step-by-step setup instructions
 - **[Deployment Guide](DEPLOY.md)** - Production deployment with systemd
 
@@ -222,8 +189,8 @@ If Telegram API is blocked in your region, you can use either:
 # Sport Event Bot
 python3 -m sport_event_bot.bot
 
-# Tournament Bot
-python3 -m tournament_bot.bot
+# MAX Sport Event Bot
+python3 -m max_sporteventbot.bot
 ```
 
 ### Project Architecture
@@ -245,7 +212,7 @@ To add a new bot to the collection:
 ## 🤝 Integration
 
 Both bots can run simultaneously:
-- Use separate MySQL databases
+- Share one MySQL database for cross-platform features, or use separate databases
 - Use different bot tokens
 - Independent message handlers
 - No conflicts or dependencies
@@ -273,7 +240,7 @@ Each bot has its own `requirements.txt` (e.g. [sport_event_bot/requirements.txt]
 
 See individual bot documentation:
 - [Sport Event Bot Troubleshooting](sport_event_bot/README.md#-troubleshooting)
-- [Tournament Bot Troubleshooting](tournament_bot/README.md#-troubleshooting)
+- [MAX Sport Event Bot Documentation](max_sporteventbot/README.md)
 
 ## 👥 Contributing
 
@@ -291,7 +258,6 @@ This project is provided as-is for sports communities.
 ## 🙏 Credits
 
 - **Sport Event Bot**: Originally created by KMiNT21 (2022), updated by wavcheb (2024)
-- **Tournament Bot**: Created for sports communities (2025)
 - **Project restructuring**: Organized into modular architecture (2025)
 
 ## 💬 Support
@@ -303,4 +269,4 @@ For bugs and feature requests:
 
 ---
 
-**Ready to organize your sports events and tournaments? Get started with the [Installation Guide](INSTALL.md)! ⚽🏆**
+**Ready to organize your sports events? Get started with the [Installation Guide](INSTALL.md)! ⚽**
