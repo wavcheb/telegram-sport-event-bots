@@ -1003,6 +1003,57 @@ async def unlink_chat(update, context):
 
 @logger.catch
 @make_translatable_user_id_context
+async def copy_event_from_linked(update, context):
+    """Copy the open event from the linked chat into this one (/event_copy)."""
+    translate = context.user_data['translate']
+    this_chat_id = update.message.chat_id
+    new_chat_id_memoization(this_chat_id, update.message.from_user.language_code)
+
+    linked = db.get_linked_chat(this_chat_id)
+    if not linked:
+        await update.message.reply_text(
+            f'{translate("This chat is not linked to any other chat.")} /link'
+        )
+        return
+    linked_chat_id, linked_platform = linked
+
+    if db.get_event_text(this_chat_id):
+        await update.message.reply_text(
+            translate('Error: An active event already exists. Close it with /event_remove first.')
+        )
+        return
+
+    linked_event = db.get_event_from_linked_chat(linked_chat_id, linked_platform)
+    if not linked_event:
+        await update.message.reply_text(
+            f'{translate("No active event in the linked chat")} ({linked_platform}).'
+        )
+        return
+
+    linked_event_id, description, event_datetime_str, players_limit, payment_url = linked_event
+    event_dt = _coerce_to_datetime(event_datetime_str) or datetime.datetime.now()
+
+    db.event_add(this_chat_id, description, event_dt, players_limit or 0, 0, '')
+    if payment_url:
+        db.set_event_payment_url(this_chat_id, payment_url)
+
+    local_event_id = db.get_event_id_by_chat_id(this_chat_id)
+    db.create_event_link(linked_event_id, local_event_id)
+
+    event_text = create_event_full_text(
+        this_chat_id, translate, payment_url, None
+    ).strip() or " "
+    new_message = await context.bot.send_message(
+        this_chat_id, event_text,
+        reply_markup=build_message_markup(translate),
+        parse_mode=ParseMode.HTML, disable_web_page_preview=True
+    )
+    db.save_latest_bot_message(this_chat_id, new_message.message_id, event_text)
+    logger.info(f"Event copied from {linked_platform} chat {linked_chat_id} to {this_chat_id}")
+
+
+@logger.catch
+@make_translatable_user_id_context
 async def show_help(update, context):
     translate = context.user_data['translate']
     new_chat_id_memoization(update.message.chat_id, update.message.from_user.language_code)
@@ -1063,6 +1114,9 @@ With CODE - completes linking with chat that generated the code.
 
 /unlink
 Remove link with another messenger chat.
+
+/event_copy
+Copy the open event from the linked messenger chat into this one.
 """)
     await context.bot.send_message(update.message.chat_id, event_text, parse_mode=ParseMode.HTML)
 
@@ -1159,6 +1213,7 @@ async def main():
     application.add_handler(CommandHandler('payments', show_payments))
     application.add_handler(CommandHandler('link', link_chat))
     application.add_handler(CommandHandler('unlink', unlink_chat))
+    application.add_handler(CommandHandler('event_copy', copy_event_from_linked))
     application.add_handler(CallbackQueryHandler(button))
     application.add_handler(MessageHandler(filters.TEXT | filters.StatusUpdate.NEW_CHAT_MEMBERS, unknown_command_handler))
 

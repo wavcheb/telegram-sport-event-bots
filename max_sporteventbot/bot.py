@@ -481,6 +481,11 @@ async def cmd_help(event: MessageCreated):
 /limit XX
 Установить лимит игроков
 
+/event_datetime ДАТА ВРЕМЯ
+Установить дату и время события в свободной форме.
+Пример 1: 2023-01-30, 18:00
+Пример 2: завтра в 14:30
+
 /info
 Показать информацию о событии
 
@@ -647,6 +652,35 @@ async def cmd_limit(event: MessageCreated):
         logger.exception(e)
 
 
+@dp.message_created(Command('event_datetime'))
+async def cmd_event_datetime(event: MessageCreated):
+    """Set event date and time from free-form text."""
+    chat_id = event.chat.chat_id
+    new_chat_id_memoization(chat_id)
+
+    if not db.get_event_text(chat_id):
+        await event.message.answer('Нет активных событий')
+        return
+
+    str_datetime = parse_cmd_arg(event.message.body.text or '')
+    if not str_datetime:
+        await event.message.answer(
+            'Укажите дату и время. Например: /event_datetime завтра в 20:00'
+        )
+        return
+
+    event_datetime = parse_datetime(str_datetime)
+    if not event_datetime:
+        await event.message.answer(
+            'Не удалось распознать дату и время. '
+            'Попробуйте иначе, например: /event_datetime завтра в 20:00'
+        )
+        return
+
+    db.set_event_datetime(chat_id, event_datetime)
+    await show_info_impl(event)
+
+
 @dp.message_created(Command('info'))
 async def cmd_info(event: MessageCreated):
     """Show event info."""
@@ -669,7 +703,9 @@ async def show_info_impl(event: MessageCreated, bot=None):
 
     _bot = bot or event.bot
 
-    # Remove buttons from old message (leave text intact)
+    # Remove buttons from old message (leave text intact).
+    # format=HTML is required: the stored text contains HTML markup, and
+    # without it MAX renders the raw tags instead of formatting them.
     old_msg_id = db.get_latest_bot_message_id(chat_id)
     old_msg_text = db.get_latest_bot_message_text(chat_id)
     if old_msg_id and old_msg_text:
@@ -678,6 +714,8 @@ async def show_info_impl(event: MessageCreated, bot=None):
                 message_id=old_msg_id,
                 text=old_msg_text,
                 attachments=[],
+                format=ParseMode.HTML,
+                disable_link_preview=True,
             )
         except Exception as e:
             logger.info(f"Could not remove buttons from old message: {e}")
@@ -1031,7 +1069,8 @@ async def handle_callback(event: MessageCallback):
 
     logger.info(f"Callback: chat_id={chat_id}, user={user.user_id}, action={callback_data}")
 
-    notification = None  # toast popup text
+    notification = None  # toast popup text (seen only by the presser)
+    chat_message = None  # message posted to the chat (seen by everyone)
 
     try:
         db.add_or_update_user(user.user_id, user.first_name or '', user.last_name or '', user.username or '')
@@ -1044,11 +1083,13 @@ async def handle_callback(event: MessageCallback):
             db.revoke_application_for_the_event(chat_id, user.user_id)
             notification = f'{full_name} отписался'
         elif callback_data == "ADD_LEGIONEER":
+            # Who brought a guest is relevant to the whole chat, not just the
+            # presser, so announce it in the chat (same as the Telegram bot).
             db.apply_for_legioneer(chat_id, user.user_id)
-            notification = f'Гость добавлен ({full_name})'
+            chat_message = f'Гость добавлен пользователем {_escape_html(full_name)}'
         elif callback_data == "REMOVE_LEGIONEER":
             db.revoke_for_legioneer(chat_id)
-            notification = f'Гость удалён ({full_name})'
+            chat_message = f'Гость удалён пользователем {_escape_html(full_name)}'
         elif callback_data == "PAY":
             result = db.process_payment(chat_id, user.user_id)
             msg_map = {
@@ -1092,6 +1133,18 @@ async def handle_callback(event: MessageCallback):
         )
         msg_id = sent_msg.message.body.mid if sent_msg and sent_msg.message else ""
         db.save_latest_bot_message(chat_id, msg_id, safe_text)
+
+    # Announcements meant for the whole chat (guest added/removed)
+    if chat_message:
+        try:
+            await event.bot.send_message(
+                chat_id=chat_id,
+                text=chat_message,
+                format=ParseMode.HTML,
+                disable_link_preview=True,
+            )
+        except Exception as e:
+            logger.warning(f"Failed to post chat message: {e}")
 
     # Cross-platform sync: update linked Telegram chat
     try:
