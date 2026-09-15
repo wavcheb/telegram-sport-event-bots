@@ -95,7 +95,7 @@ $stmt = $pdo->prepare("
 $stmt->execute($all_event_ids);
 $participants = $stmt->fetchAll(PDO::FETCH_ASSOC);
 
-// Duty player (washes the bibs, plays for free). Stored once per event
+// Duty player (plays for free). Stored once per event
 // chain, so look it up across all linked event ids.
 $duty_keys = [];
 try {

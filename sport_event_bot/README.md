@@ -164,7 +164,7 @@ This creates an event with description "Football Saturday 18:00" and shows a �
 
 ### Duty Roster
 
-The duty player washes the bibs and plays for free.
+The duty player plays for free (whatever the chat treats duty as — washing the bibs, bringing the ball, hosting).
 
 - `/event_duty` - Pick the duty player: among the event's participants, whoever
   has the fewest past duties is picked (at random among ties). Guests and
@@ -175,6 +175,24 @@ The duty player washes the bibs and plays for free.
 
 Duty is always assigned explicitly — chats that don't do duty simply never use
 these commands.
+
+### One player, two messengers
+
+Duty is counted per person, not per account. The bot cannot tell that a MAX
+account and a Telegram account belong to the same player until they are
+linked — until then they count as two participants, and a duty served on one
+side does not count on the other.
+
+The player links them once, themselves:
+
+1. `/iam` in one messenger — the bot issues a code
+2. `/iam CODE` in the other messenger, **from their own account** — done
+
+From then on both accounts' duties add up, the player counts once among the
+candidates, and `/duty_stats` shows a single row. `/iam_forget` unlinks.
+
+The code is single-use, but whoever enters it gets linked to you — so it
+should not be forwarded.
 
 The duty player is marked 🧹 in the event announcement and gets a green
 "Дежурный" badge on the payments page, counting as settled up.
@@ -190,7 +208,7 @@ linked MAX chat too, and the announcement is posted in both.
 
 ## 🗄️ Database Schema
 
-The bot uses MySQL with 10 tables:
+The bot uses MySQL with 12 tables:
 
 - **Users**: User profiles (id, first_name, last_name, username)
 - **Chats**: Chat/group information and latest bot message
@@ -201,7 +219,8 @@ The bot uses MySQL with 10 tables:
 - **PaymentLog**: Payment confirmation log
 - **ChatLinks**: Cross-platform (Telegram ↔ MAX) chat links
 - **EventLinks**: Cross-platform event links
-- **Duty**: Duty roster — who washes the bibs (and plays free) at each event
+- **Duty**: Duty roster — who is on duty (and plays free) at each event
+- **UserLinks / UserLinkCodes**: Accounts of the same person across messengers
 
 ## 🌍 Supported Languages
 

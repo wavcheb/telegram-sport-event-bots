@@ -64,6 +64,8 @@ BOT_COMMANDS = [
     ('event_duty', 'Выбрать дежурного на событие'),
     ('mepls', 'Вызваться дежурить самому'),
     ('duty_stats', 'Статистика дежурств'),
+    ('iam', 'Связать свои аккаунты MAX и Telegram'),
+    ('iam_forget', 'Разорвать связь своих аккаунтов'),
     ('fix', 'Зафиксировать состав и статистику'),
     ('penalty', 'Добавить штраф за неявку'),
     ('stat', 'Статистика участников чата'),
@@ -220,6 +222,20 @@ def _tg_request_sync(url: str, data: dict) -> Optional[bytes]:
     except Exception as e:
         logger.warning(f"Telegram sync (urllib) failed: {_redact_token(str(e))}")
     return None
+
+
+# Inline keyboard sent along with cross-platform edits of the Telegram event
+# message. Telegram clears the markup when an edit omits it, so every sync
+# must re-send it.
+TELEGRAM_EVENT_KEYBOARD_JSON = json.dumps({
+    "inline_keyboard": [
+        [{"text": "+ Записаться", "callback_data": "ADD"}],
+        [{"text": "- Отписаться", "callback_data": "REMOVE"}],
+        [{"text": "+ Добавить друга/легионера", "callback_data": "ADD_LEGIONEER"}],
+        [{"text": "- Убрать последнего легионера", "callback_data": "REMOVE_LEGIONEER"}],
+        [{"text": "💰 Оплата подтверждена", "callback_data": "PAY"}],
+    ]
+})
 
 
 async def send_message_to_telegram(linked_chat_id: int, text: str) -> bool:
@@ -452,9 +468,13 @@ def create_event_full_text(this_chat_id: int, payment_url: str = None, closed: s
     def _wrap_closed(s: str) -> str:
         return f'<s>{s}</s>' if closed else s
 
-    # Duty player (washes the bibs, plays for free) — marked with a broom
+    # Duty player (plays for free) — marked with a broom. Compare against
+    # every account of that person, so the mark lands on them whichever
+    # messenger they signed up from.
     duty = db.get_event_duty(this_chat_id)
-    duty_key = (duty[0], duty[1]) if duty else None
+    duty_accounts = set(
+        db.get_person_accounts(db.get_person_key(duty[0], duty[1]))
+    ) if duty else set()
 
     # Show local players
     for n, user_id in enumerate(players, start=1):
@@ -464,7 +484,7 @@ def create_event_full_text(this_chat_id: int, payment_url: str = None, closed: s
         printable_name = _escape_html(db.compose_full_name(user_id))
         games_registered, penalties = db.get_chat_user_rp(this_chat_id, user_id)
         paid = db.get_payment_status(this_chat_id, user_id)
-        if duty_key == (user_id, db.PLATFORM):
+        if (user_id, db.PLATFORM) in duty_accounts:
             payment_mark = ' 🧹 [дежурный]'
         else:
             payment_mark = ' [оплачено]' if paid else ''
@@ -481,7 +501,7 @@ def create_event_full_text(this_chat_id: int, payment_url: str = None, closed: s
             in_squad = '+' if not players_limit or n <= players_limit else '  '
             safe_name = _escape_html(name)
             platform_mark = f' [{_escape_html(platform)}]'
-            duty_mark = ' 🧹 [дежурный]' if duty_key == (user_id, platform) else ''
+            duty_mark = ' 🧹 [дежурный]' if (user_id, platform) in duty_accounts else ''
             text_players += f'{in_squad} {n}. {_wrap_closed(safe_name + platform_mark + duty_mark)}\n'
 
     text += text_players
@@ -601,13 +621,20 @@ async def cmd_help(event: MessageCreated):
 
 /event_duty
 Выбрать дежурного на событие: из участников с наименьшим числом
-дежурств выбирается случайный. Дежурный стирает манишки и не платит за игру.
+дежурств выбирается случайный. Дежурный за игру не платит.
 
 /mepls
 Вызваться дежурить самому
 
 /duty_stats
 Статистика дежурств: кто сколько раз дежурил и кто ещё ни разу
+
+/iam [КОД]
+Связать свои аккаунты в MAX и Telegram, чтобы история дежурств считалась
+по человеку, а не по аккаунту. Без КОД - выдаёт код, с КОД - завершает связку.
+
+/iam_forget
+Разорвать связь своих аккаунтов
 """
     await event.message.answer(help_text)
 
@@ -1139,39 +1166,76 @@ async def cmd_event_copy(event: MessageCreated):
 
 # ==================== Duty roster ====================
 
+async def _refresh_event_message(bot_instance, chat_id: int) -> bool:
+    """Redraw the existing announcement in place, keeping its buttons.
+
+    Unlike show_info_impl() this posts nothing new — the chat must not end up
+    with two button-bearing announcements after a duty is assigned."""
+    message_id = db.get_latest_bot_message_id(chat_id)
+    if not message_id:
+        return False
+    payment_url = db.get_event_payment_url(chat_id)
+    text = create_event_full_text(chat_id, payment_url).strip() or " "
+    keyboard = build_event_keyboard()
+    try:
+        await bot_instance.edit_message(
+            message_id=message_id,
+            text=text,
+            attachments=[keyboard] if keyboard else None,
+            format=ParseMode.HTML,
+            disable_link_preview=True,
+        )
+        db.save_latest_bot_message(chat_id, message_id, text)
+        return True
+    except Exception as e:
+        logger.warning(f"Could not refresh event message: {e}")
+        return False
+
+
 async def _announce_duty(event: MessageCreated, user_id: int, platform: str,
                          name: str, volunteered: bool):
     """Announce the duty in this chat and in the linked Telegram chat."""
     chat_id = event.chat.chat_id
     safe_name = _escape_html(name)
+
+    # Redraw the existing announcement so the broom shows up there. If there is
+    # no live announcement to edit, fall back to posting a fresh one.
+    refreshed = await _refresh_event_message(event.bot, chat_id)
+
     platform_mark = '' if platform == db.PLATFORM else f' [{_escape_html(platform)}]'
     if volunteered:
-        text = (f'🧹 <b>{safe_name}</b>{platform_mark} вызвался дежурить. Спасибо!\n'
-                'Стирает манишки и за игру не платит.')
+        text = f'🧹 <b>{safe_name}</b>{platform_mark} вызвался дежурить. Спасибо!'
     else:
-        text = (f'🧹 Дежурный на это событие: <b>{safe_name}</b>{platform_mark}\n'
-                'Стирает манишки и за игру не платит.')
+        text = f'🧹 Дежурный на это событие: <b>{safe_name}</b>{platform_mark}'
     await event.bot.send_message(
         chat_id=chat_id, text=text, format=ParseMode.HTML, disable_link_preview=True
     )
 
-    # Mirror into the linked Telegram chat. A real mention only works for
-    # Telegram users, so a MAX player is named in plain text there.
+    if not refreshed:
+        await show_info_impl(event)
+
+    # Mirror into the linked Telegram chat: update its event message and announce.
+    # A real mention only works for Telegram users, so a MAX player is named
+    # in plain text there.
     try:
+        linked_info = db.get_linked_chat_message_info(chat_id)
+        if linked_info:
+            linked_chat_id, linked_platform, linked_message_id = linked_info
+            if linked_platform == 'telegram' and linked_message_id:
+                await sync_to_telegram(
+                    linked_chat_id, linked_message_id,
+                    create_telegram_message_text(chat_id, db.get_event_payment_url(chat_id)),
+                    TELEGRAM_EVENT_KEYBOARD_JSON,
+                )
         linked = db.get_linked_chat(chat_id)
         if linked and linked[1] == 'telegram':
             if platform == 'telegram':
                 mention = f'<a href="tg://user?id={user_id}">{safe_name}</a>'
             else:
                 mention = f'<b>{safe_name}</b> [max]'
-            await send_message_to_telegram(
-                linked[0],
-                f'🧹 Дежурный: {mention}\nСтирает манишки и за игру не платит.'
-            )
+            await send_message_to_telegram(linked[0], f'🧹 Дежурный: {mention}')
     except Exception as e:
         logger.warning(f"Failed to announce duty in linked chat: {e}")
-
-    await show_info_impl(event)
 
 
 @dp.message_created(Command('event_duty'))
@@ -1188,7 +1252,7 @@ async def cmd_event_duty(event: MessageCreated):
     existing = db.get_event_duty(chat_id)
     if existing:
         still_playing = any(
-            (uid, plat) == (existing[0], existing[1])
+            db.is_same_person(uid, plat, existing[0], existing[1])
             for uid, plat, _ in db.get_duty_candidates(chat_id)
         )
         if still_playing:
@@ -1230,7 +1294,7 @@ async def cmd_mepls(event: MessageCreated):
         return
 
     existing = db.get_event_duty(chat_id)
-    if existing and existing[0] == user.user_id and existing[1] == db.PLATFORM:
+    if existing and db.is_same_person(existing[0], existing[1], user.user_id, db.PLATFORM):
         await event.message.answer('Вы уже дежурный на этом событии.')
         return
 
@@ -1238,6 +1302,66 @@ async def cmd_mepls(event: MessageCreated):
     name = db.compose_full_name(user.user_id)
     logger.info(f"Duty volunteered: {user.user_id} in chat {chat_id}")
     await _announce_duty(event, user.user_id, db.PLATFORM, name, volunteered=True)
+
+
+@dp.message_created(Command('iam'))
+async def cmd_iam(event: MessageCreated):
+    """Link your MAX and Telegram accounts into one person.
+
+    Without a code: report the current state and issue a code to enter in the
+    other messenger. With a code: complete the link."""
+    chat_id = event.chat.chat_id
+    user = event.message.sender
+    new_chat_id_memoization(chat_id)
+    db.add_or_update_user(user.user_id, user.first_name or '', user.last_name or '', user.username or '')
+
+    code = parse_cmd_arg(event.message.body.text or '')
+    if code:
+        other = db.complete_identity_link(user.user_id, code)
+        if not other:
+            await event.message.answer('Этот код неизвестен или уже использован.')
+            return
+        other_name = db.get_duty_display_name(other[0], other[1])
+        await event.bot.send_message(
+            chat_id=chat_id,
+            text=(f'✅ Аккаунты связаны: <b>{_escape_html(other_name)}</b> '
+                  f'[{_escape_html(other[1])}]\nИстория дежурств теперь общая.'),
+            format=ParseMode.HTML, disable_link_preview=True,
+        )
+        return
+
+    linked = db.get_linked_identity(user.user_id)
+    if linked:
+        names = ', '.join(
+            f'<b>{_escape_html(db.get_duty_display_name(uid, plat))}</b> [{_escape_html(plat)}]'
+            for uid, plat in linked
+        )
+        await event.bot.send_message(
+            chat_id=chat_id,
+            text=f'🔗 Ваш аккаунт связан с: {names}\nРазорвать связь: /iam_forget',
+            format=ParseMode.HTML, disable_link_preview=True,
+        )
+        return
+
+    secret = db.create_identity_code(user.user_id)
+    await event.bot.send_message(
+        chat_id=chat_id,
+        text=(f'🔗 Ваш код для связки аккаунтов:\n\n{secret}\n\n'
+              'Отправьте "/iam КОД" в другом мессенджере со своего аккаунта.\n'
+              'Кто введёт этот код, тот и будет связан с вами — не передавайте его.'),
+    )
+
+
+@dp.message_created(Command('iam_forget'))
+async def cmd_iam_forget(event: MessageCreated):
+    """Detach this account from its linked one."""
+    chat_id = event.chat.chat_id
+    user = event.message.sender
+    new_chat_id_memoization(chat_id)
+    if db.unlink_identity(user.user_id):
+        await event.message.answer('✅ Связь аккаунтов разорвана.')
+    else:
+        await event.message.answer('Ваш аккаунт не связан с другим.')
 
 
 def _plural_times(n: int) -> str:
@@ -1265,7 +1389,8 @@ async def cmd_duty_stats(event: MessageCreated):
     if stats:
         for user_id, platform, name, count in stats:
             mark = '' if platform == db.PLATFORM else f' [{_escape_html(platform)}]'
-            current = ' ← сейчас' if duty_now and (user_id, platform) == (duty_now[0], duty_now[1]) else ''
+            current = ' ← сейчас' if duty_now and db.is_same_person(
+                user_id, platform, duty_now[0], duty_now[1]) else ''
             lines.append(f'{_escape_html(name)}{mark} — {count} {_plural_times(count)}{current}')
     else:
         lines.append('<i>Дежурств ещё не было.</i>')
@@ -1273,10 +1398,10 @@ async def cmd_duty_stats(event: MessageCreated):
     # Participants of the open event who have never been on duty are the
     # ones /event_duty will pick from next.
     try:
-        served = {(uid, plat) for uid, plat, _, _ in stats}
+        served = {db.get_person_key(uid, plat) for uid, plat, _, _ in stats}
         never = [
             (name, plat) for uid, plat, name in db.get_duty_candidates(chat_id)
-            if (uid, plat) not in served
+            if db.get_person_key(uid, plat) not in served
         ]
         if never:
             lines.append('\n<b>Ещё не дежурили</b> (из записавшихся):')
@@ -1392,17 +1517,10 @@ async def handle_callback(event: MessageCallback):
             if linked_platform == 'telegram' and linked_message_id:
                 # Generate Telegram-formatted message using original chat_id's event data
                 tg_text = create_telegram_message_text(chat_id, payment_url)
-                # Telegram inline keyboard JSON
-                tg_keyboard = json.dumps({
-                    "inline_keyboard": [
-                        [{"text": "+ Записаться", "callback_data": "ADD"}],
-                        [{"text": "- Отписаться", "callback_data": "REMOVE"}],
-                        [{"text": "+ Добавить друга/легионера", "callback_data": "ADD_LEGIONEER"}],
-                        [{"text": "- Убрать последнего легионера", "callback_data": "REMOVE_LEGIONEER"}],
-                        [{"text": "💰 Оплата подтверждена", "callback_data": "PAY"}],
-                    ]
-                })
-                await sync_to_telegram(linked_chat_id, linked_message_id, tg_text, tg_keyboard)
+                await sync_to_telegram(
+                    linked_chat_id, linked_message_id, tg_text,
+                    TELEGRAM_EVENT_KEYBOARD_JSON,
+                )
     except Exception as e:
         logger.warning(f"Cross-platform sync failed: {e}")
 
