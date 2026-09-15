@@ -1100,9 +1100,42 @@ def _duty_mention(user_id: int, platform: str, name: str) -> str:
     return f'<b>{safe_name}</b> [{_html_escape(platform)}]'
 
 
+async def _refresh_event_message(context, this_chat_id, translate) -> bool:
+    """Redraw the existing announcement in place, keeping its buttons.
+
+    Unlike show_info() this posts nothing new — the chat must not end up with
+    two button-bearing announcements after a duty is assigned."""
+    message_id = db.get_latest_bot_message_id(this_chat_id)
+    if not message_id:
+        return False
+    payment_url = db.get_event_payment_url(this_chat_id)
+    telegraph_url = db.get_event_telegraph_url(this_chat_id)
+    text = create_event_full_text(
+        this_chat_id, translate, payment_url, telegraph_url
+    ).strip() or " "
+    try:
+        await context.bot.edit_message_text(
+            chat_id=this_chat_id, message_id=message_id, text=text,
+            reply_markup=build_message_markup(translate),
+            parse_mode=ParseMode.HTML, disable_web_page_preview=True
+        )
+        db.save_latest_bot_message(this_chat_id, message_id, text)
+        return True
+    except Exception as e:
+        if "message is not modified" in str(e).lower():
+            return True
+        logger.warning(f"Could not refresh event message: {e}")
+        return False
+
+
 async def _announce_duty(update, context, translate, user_id, platform, name, volunteered):
-    """Announce the duty in this chat and in the linked chat, then refresh info."""
+    """Refresh the announcement in place, then announce the duty in both chats."""
     this_chat_id = update.message.chat_id
+
+    # Redraw the existing announcement so the broom shows up there. If there is
+    # no live announcement to edit, fall back to posting a fresh one.
+    refreshed = await _refresh_event_message(context, this_chat_id, translate)
+
     mention = _duty_mention(user_id, platform, name)
     if volunteered:
         text = (f'🧹 {mention} ' + translate('volunteered for duty. Thanks!') + '\n'
@@ -1112,8 +1145,20 @@ async def _announce_duty(update, context, translate, user_id, platform, name, vo
                 + translate('Washes the bibs and plays for free.'))
     await context.bot.send_message(this_chat_id, text, parse_mode=ParseMode.HTML)
 
-    # Mirror the announcement into the linked MAX chat, if any
+    if not refreshed:
+        await show_info(update, context)
+
+    # Mirror into the linked MAX chat: update its event message and announce
     try:
+        linked_info = db.get_linked_chat_message_info(this_chat_id)
+        if linked_info:
+            linked_chat_id, linked_platform, linked_message_id = linked_info
+            if linked_platform == 'max' and linked_message_id:
+                payment_url = db.get_event_payment_url(this_chat_id)
+                await sync_to_max(
+                    linked_chat_id, linked_message_id,
+                    create_max_message_text(this_chat_id, payment_url)
+                )
         linked = db.get_linked_chat(this_chat_id)
         if linked and linked[1] == 'max':
             plain = (f'🧹 Дежурный: <b>{_html_escape(name)}</b>'
@@ -1122,8 +1167,6 @@ async def _announce_duty(update, context, translate, user_id, platform, name, vo
             await send_message_to_max(linked[0], plain)
     except Exception as e:
         logger.warning(f"Failed to announce duty in linked chat: {e}")
-
-    await show_info(update, context)
 
 
 @logger.catch

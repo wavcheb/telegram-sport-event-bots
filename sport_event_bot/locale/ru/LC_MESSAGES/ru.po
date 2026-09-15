@@ -283,3 +283,67 @@ msgstr "скорее всего за себя"
 #: bot.py
 msgid "marked payment at"
 msgstr "сообщил об оплате в"
+
+#: bot.py
+msgid "On duty"
+msgstr "Дежурный"
+
+#: bot.py
+msgid "plays for free"
+msgstr "за игру не платит"
+
+#: bot.py
+msgid "On duty for this event"
+msgstr "Дежурный на это событие"
+
+#: bot.py
+msgid "volunteered for duty. Thanks!"
+msgstr "вызвался дежурить. Спасибо!"
+
+#: bot.py
+msgid "Washes the bibs and plays for free."
+msgstr "Стирает манишки и за игру не платит."
+
+#: bot.py
+msgid "Duty is already assigned"
+msgstr "Дежурный уже назначен"
+
+#: bot.py
+msgid "Someone else can take over with /mepls"
+msgstr "Подменить его можно командой /mepls"
+
+#: bot.py
+msgid "No eligible participants for duty yet (guests do not count)."
+msgstr "Нет подходящих участников для дежурства (гости и легионеры не считаются)."
+
+#: bot.py
+msgid "Register for the event first, then volunteer for duty."
+msgstr "Сначала запишитесь на событие, потом вызывайтесь дежурить."
+
+#: bot.py
+msgid "You are already on duty for this event."
+msgstr "Вы уже дежурный на этом событии."
+
+#: bot.py
+msgid "Duty statistics"
+msgstr "Статистика дежурств"
+
+#: bot.py
+msgid "current"
+msgstr "сейчас"
+
+#: bot.py
+msgid "Nobody has been on duty yet."
+msgstr "Дежурств ещё не было."
+
+#: bot.py
+msgid "Never on duty"
+msgstr "Ещё не дежурили"
+
+#: bot.py
+msgid "among registered"
+msgstr "из записавшихся"
+
+#: bot.py
+msgid "No active event in the linked chat"
+msgstr "В связанном чате нет активного события"

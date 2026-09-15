@@ -222,6 +222,20 @@ def _tg_request_sync(url: str, data: dict) -> Optional[bytes]:
     return None
 
 
+# Inline keyboard sent along with cross-platform edits of the Telegram event
+# message. Telegram clears the markup when an edit omits it, so every sync
+# must re-send it.
+TELEGRAM_EVENT_KEYBOARD_JSON = json.dumps({
+    "inline_keyboard": [
+        [{"text": "+ Записаться", "callback_data": "ADD"}],
+        [{"text": "- Отписаться", "callback_data": "REMOVE"}],
+        [{"text": "+ Добавить друга/легионера", "callback_data": "ADD_LEGIONEER"}],
+        [{"text": "- Убрать последнего легионера", "callback_data": "REMOVE_LEGIONEER"}],
+        [{"text": "💰 Оплата подтверждена", "callback_data": "PAY"}],
+    ]
+})
+
+
 async def send_message_to_telegram(linked_chat_id: int, text: str) -> bool:
     """Post a new (plain announcement) message into a linked Telegram chat."""
     if not TG_BOT_TOKEN:
@@ -1139,11 +1153,42 @@ async def cmd_event_copy(event: MessageCreated):
 
 # ==================== Duty roster ====================
 
+async def _refresh_event_message(bot_instance, chat_id: int) -> bool:
+    """Redraw the existing announcement in place, keeping its buttons.
+
+    Unlike show_info_impl() this posts nothing new — the chat must not end up
+    with two button-bearing announcements after a duty is assigned."""
+    message_id = db.get_latest_bot_message_id(chat_id)
+    if not message_id:
+        return False
+    payment_url = db.get_event_payment_url(chat_id)
+    text = create_event_full_text(chat_id, payment_url).strip() or " "
+    keyboard = build_event_keyboard()
+    try:
+        await bot_instance.edit_message(
+            message_id=message_id,
+            text=text,
+            attachments=[keyboard] if keyboard else None,
+            format=ParseMode.HTML,
+            disable_link_preview=True,
+        )
+        db.save_latest_bot_message(chat_id, message_id, text)
+        return True
+    except Exception as e:
+        logger.warning(f"Could not refresh event message: {e}")
+        return False
+
+
 async def _announce_duty(event: MessageCreated, user_id: int, platform: str,
                          name: str, volunteered: bool):
     """Announce the duty in this chat and in the linked Telegram chat."""
     chat_id = event.chat.chat_id
     safe_name = _escape_html(name)
+
+    # Redraw the existing announcement so the broom shows up there. If there is
+    # no live announcement to edit, fall back to posting a fresh one.
+    refreshed = await _refresh_event_message(event.bot, chat_id)
+
     platform_mark = '' if platform == db.PLATFORM else f' [{_escape_html(platform)}]'
     if volunteered:
         text = (f'🧹 <b>{safe_name}</b>{platform_mark} вызвался дежурить. Спасибо!\n'
@@ -1155,9 +1200,22 @@ async def _announce_duty(event: MessageCreated, user_id: int, platform: str,
         chat_id=chat_id, text=text, format=ParseMode.HTML, disable_link_preview=True
     )
 
-    # Mirror into the linked Telegram chat. A real mention only works for
-    # Telegram users, so a MAX player is named in plain text there.
+    if not refreshed:
+        await show_info_impl(event)
+
+    # Mirror into the linked Telegram chat: update its event message and announce.
+    # A real mention only works for Telegram users, so a MAX player is named
+    # in plain text there.
     try:
+        linked_info = db.get_linked_chat_message_info(chat_id)
+        if linked_info:
+            linked_chat_id, linked_platform, linked_message_id = linked_info
+            if linked_platform == 'telegram' and linked_message_id:
+                await sync_to_telegram(
+                    linked_chat_id, linked_message_id,
+                    create_telegram_message_text(chat_id, db.get_event_payment_url(chat_id)),
+                    TELEGRAM_EVENT_KEYBOARD_JSON,
+                )
         linked = db.get_linked_chat(chat_id)
         if linked and linked[1] == 'telegram':
             if platform == 'telegram':
@@ -1170,8 +1228,6 @@ async def _announce_duty(event: MessageCreated, user_id: int, platform: str,
             )
     except Exception as e:
         logger.warning(f"Failed to announce duty in linked chat: {e}")
-
-    await show_info_impl(event)
 
 
 @dp.message_created(Command('event_duty'))
@@ -1392,17 +1448,10 @@ async def handle_callback(event: MessageCallback):
             if linked_platform == 'telegram' and linked_message_id:
                 # Generate Telegram-formatted message using original chat_id's event data
                 tg_text = create_telegram_message_text(chat_id, payment_url)
-                # Telegram inline keyboard JSON
-                tg_keyboard = json.dumps({
-                    "inline_keyboard": [
-                        [{"text": "+ Записаться", "callback_data": "ADD"}],
-                        [{"text": "- Отписаться", "callback_data": "REMOVE"}],
-                        [{"text": "+ Добавить друга/легионера", "callback_data": "ADD_LEGIONEER"}],
-                        [{"text": "- Убрать последнего легионера", "callback_data": "REMOVE_LEGIONEER"}],
-                        [{"text": "💰 Оплата подтверждена", "callback_data": "PAY"}],
-                    ]
-                })
-                await sync_to_telegram(linked_chat_id, linked_message_id, tg_text, tg_keyboard)
+                await sync_to_telegram(
+                    linked_chat_id, linked_message_id, tg_text,
+                    TELEGRAM_EVENT_KEYBOARD_JSON,
+                )
     except Exception as e:
         logger.warning(f"Cross-platform sync failed: {e}")
 
