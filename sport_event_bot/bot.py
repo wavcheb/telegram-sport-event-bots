@@ -1217,6 +1217,9 @@ async def _announce_duty(update, context, translate, user_id, platform, name, vo
         await show_info(update, context)
 
     # Mirror into the linked MAX chat: update its event message and announce
+    # get_linked_chat_message_info() returns None once the linked chat's event
+    # is closed, so a fixed announcement is neither overwritten nor followed by
+    # a duty note about an event that chat has already finished.
     try:
         linked_info = db.get_linked_chat_message_info(this_chat_id)
         if linked_info:
@@ -1227,11 +1230,9 @@ async def _announce_duty(update, context, translate, user_id, platform, name, vo
                     linked_chat_id, linked_message_id,
                     create_max_message_text(this_chat_id, payment_url)
                 )
-        linked = db.get_linked_chat(this_chat_id)
-        if linked and linked[1] == 'max':
-            plain = (f'🧹 Дежурный: <b>{_html_escape(name)}</b>'
-                     + ('' if platform == 'max' else ' [telegram]'))
-            await send_message_to_max(linked[0], plain)
+                plain = (f'🧹 Дежурный: <b>{_html_escape(name)}</b>'
+                         + ('' if platform == 'max' else ' [telegram]'))
+                await send_message_to_max(linked_chat_id, plain)
     except Exception as e:
         logger.warning(f"Failed to announce duty in linked chat: {e}")
 

@@ -716,13 +716,15 @@ async def cmd_event_remove(event: MessageCreated):
         return
 
     # Build fresh closed-state text (regenerated, not fetched from DB) to
-    # avoid any encoding glitches with stored text.
-    payment_url = db.get_event_payment_url(chat_id)
-    closed_text = create_event_full_text(chat_id, payment_url, closed='removed').strip() or " "
-
+    # avoid any encoding glitches with stored text. Rendering stays inside the
+    # try so a failure there still leaves the event closed below.
     old_msg_id = db.get_latest_bot_message_id(chat_id)
     if old_msg_id:
         try:
+            payment_url = db.get_event_payment_url(chat_id)
+            closed_text = create_event_full_text(
+                chat_id, payment_url, closed='removed'
+            ).strip() or " "
             await event.bot.edit_message(
                 message_id=old_msg_id,
                 text=closed_text,
@@ -731,7 +733,17 @@ async def cmd_event_remove(event: MessageCreated):
             )
             db.save_latest_bot_message(chat_id, old_msg_id, closed_text)
         except Exception as e:
-            logger.info(f"Could not edit old message on event_remove: {e}")
+            logger.warning(f"Could not mark event as removed: {e}")
+            # At least take the buttons off the stale announcement
+            try:
+                await event.bot.edit_message(
+                    message_id=old_msg_id,
+                    text=db.get_latest_bot_message_text(chat_id) or " ",
+                    attachments=[],
+                    format=ParseMode.HTML,
+                )
+            except Exception as e2:
+                logger.warning(f"Could not clear buttons on event_remove: {e2}")
 
     db.close_all_open_events_for_chat(chat_id)
     await event.message.answer('Событие удалено.')
@@ -935,12 +947,15 @@ async def cmd_fix(event: MessageCreated):
 
     # Mark event message as closed (strikethrough, remove buttons) before
     # actually closing it in the DB so that create_event_full_text still
-    # has access to event data.
-    payment_url = db.get_event_payment_url(chat_id)
-    closed_text = create_event_full_text(chat_id, payment_url, closed='finished').strip() or " "
+    # has access to event data. Rendering is inside the try as well: a failure
+    # there must not stop the event from being closed below.
     old_msg_id = db.get_latest_bot_message_id(chat_id)
     if old_msg_id:
         try:
+            payment_url = db.get_event_payment_url(chat_id)
+            closed_text = create_event_full_text(
+                chat_id, payment_url, closed='finished'
+            ).strip() or " "
             await event.bot.edit_message(
                 message_id=old_msg_id,
                 text=closed_text,
@@ -949,7 +964,17 @@ async def cmd_fix(event: MessageCreated):
             )
             db.save_latest_bot_message(chat_id, old_msg_id, closed_text)
         except Exception as e:
-            logger.info(f"Could not edit old message on fix: {e}")
+            logger.warning(f"Could not mark event as closed on fix: {e}")
+            # At least take the buttons off the stale announcement
+            try:
+                await event.bot.edit_message(
+                    message_id=old_msg_id,
+                    text=db.get_latest_bot_message_text(chat_id) or " ",
+                    attachments=[],
+                    format=ParseMode.HTML,
+                )
+            except Exception as e2:
+                logger.warning(f"Could not clear buttons on fix: {e2}")
 
     db.fix_event(chat_id)
 
@@ -1217,6 +1242,9 @@ async def _announce_duty(event: MessageCreated, user_id: int, platform: str,
     # Mirror into the linked Telegram chat: update its event message and announce.
     # A real mention only works for Telegram users, so a MAX player is named
     # in plain text there.
+    # get_linked_chat_message_info() returns None once the linked chat's event
+    # is closed, so a fixed announcement is neither overwritten nor followed by
+    # a duty note about an event that chat has already finished.
     try:
         linked_info = db.get_linked_chat_message_info(chat_id)
         if linked_info:
@@ -1227,13 +1255,11 @@ async def _announce_duty(event: MessageCreated, user_id: int, platform: str,
                     create_telegram_message_text(chat_id, db.get_event_payment_url(chat_id)),
                     TELEGRAM_EVENT_KEYBOARD_JSON,
                 )
-        linked = db.get_linked_chat(chat_id)
-        if linked and linked[1] == 'telegram':
-            if platform == 'telegram':
-                mention = f'<a href="tg://user?id={user_id}">{safe_name}</a>'
-            else:
-                mention = f'<b>{safe_name}</b> [max]'
-            await send_message_to_telegram(linked[0], f'🧹 Дежурный: {mention}')
+                if platform == 'telegram':
+                    mention = f'<a href="tg://user?id={user_id}">{safe_name}</a>'
+                else:
+                    mention = f'<b>{safe_name}</b> [max]'
+                await send_message_to_telegram(linked_chat_id, f'🧹 Дежурный: {mention}')
     except Exception as e:
         logger.warning(f"Failed to announce duty in linked chat: {e}")
 

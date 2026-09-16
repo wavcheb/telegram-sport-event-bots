@@ -769,9 +769,18 @@ def get_linked_chat_message_info(chat_id: int) -> Optional[Tuple[int, str, str]]
         return None
     linked_chat_id, linked_platform = linked
     conn = reconnect()
+    # Only sync into a chat that still has an OPEN event. Once its event is
+    # fixed or removed, its announcement has been struck through and stripped
+    # of buttons — overwriting it would undo that and bring the buttons back.
     cur = _exec(conn, '''
-        SELECT latest_bot_message_id FROM Chats
-        WHERE chat_id = %s AND platform = %s LIMIT 1
+        SELECT c.latest_bot_message_id FROM Chats c
+        WHERE c.chat_id = %s AND c.platform = %s
+          AND EXISTS (
+              SELECT 1 FROM Events e
+              WHERE e.chat_id = c.chat_id AND e.platform = c.platform
+                AND e.status = 'Open'
+          )
+        LIMIT 1
     ''', (linked_chat_id, linked_platform))
     row = cur.fetchone()
     conn.close()
