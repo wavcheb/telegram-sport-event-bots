@@ -162,6 +162,16 @@ MYSQL_DATABASE=futsal_bot
 
 Bots are separated by `platform` field (`telegram` / `max`).
 
+Because both bots share the tables, rows are keyed by **(id, platform)**, not by
+id alone — the same chat or user id can exist in both messengers, and one bot's
+row must never overwrite the other's. Tables are created correctly on a fresh
+database; when starting against a database made by an older version, each bot
+runs `migrate_schema()`, which adds missing columns, widens
+`Chats.latest_bot_message_id` to `VARCHAR(64)` (MAX message ids are strings like
+`mid.abc123`) and rebuilds those primary keys. Every step is a no-op once
+applied, and any step it cannot perform is logged as an error with the exact
+`ALTER` to run by hand.
+
 ### Telegram API in Blocked Regions
 
 If Telegram API is blocked in your region, you can use either:

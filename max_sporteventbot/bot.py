@@ -854,7 +854,6 @@ async def show_info_impl(event: MessageCreated, bot=None):
         disable_link_preview=True,
     )
     msg_id = sent_msg.message.body.mid if sent_msg and sent_msg.message else ""
-    logger.info(f"show_info_impl: sent new message, mid={msg_id}")
     db.save_latest_bot_message(chat_id, msg_id, event_text)
 
 
@@ -949,7 +948,6 @@ async def cmd_fix(event: MessageCreated):
     # has access to event data. Rendering is inside the try as well: a failure
     # there must not stop the event from being closed below.
     old_msg_id = db.get_latest_bot_message_id(chat_id)
-    logger.info(f"fix: chat {chat_id} announcement id = {old_msg_id!r}")
     if old_msg_id:
         try:
             payment_url = db.get_event_payment_url(chat_id)
@@ -1201,7 +1199,6 @@ async def _refresh_event_message(bot_instance, chat_id: int) -> bool:
     with two button-bearing announcements after a duty is assigned."""
     message_id = db.get_latest_bot_message_id(chat_id)
     if not message_id:
-        logger.info(f"refresh: chat {chat_id} has no stored announcement id")
         return False
     try:
         payment_url = db.get_event_payment_url(chat_id)
@@ -1214,7 +1211,6 @@ async def _refresh_event_message(bot_instance, chat_id: int) -> bool:
             format=ParseMode.HTML,
         )
         db.save_latest_bot_message(chat_id, message_id, text)
-        logger.info(f"refresh: edited announcement {message_id} in chat {chat_id}")
         return True
     except Exception as e:
         logger.warning(
@@ -1606,22 +1602,6 @@ async def main():
         sys.exit(1)
 
     bot = Bot(api_token)
-
-    # Which files are actually loaded, and when they were last changed. A bot
-    # updated one file at a time otherwise fails in ways the code cannot explain.
-    for mod_name, mod in (('bot', sys.modules[__name__]), ('db_mysql', db)):
-        try:
-            path = mod.__file__
-            changed = datetime.datetime.fromtimestamp(os.path.getmtime(path))
-            logger.info(f"Loaded {mod_name}: {path} (modified {changed:%Y-%m-%d %H:%M:%S})")
-        except Exception as e:
-            logger.warning(f"Could not stat module {mod_name}: {e}")
-    if not hasattr(db, 'get_person_key'):
-        logger.error(
-            "db_mysql.py is out of date: it has no get_person_key(). Copy the "
-            "current db_mysql.py next to bot.py and restart — duty, identity and "
-            "message-id storage all need it."
-        )
 
     # Initialize database tables
     db.init_database()
