@@ -319,6 +319,22 @@ def save_latest_bot_message(chat_id, message_id, message_text):
     _exec(conn, '''UPDATE Chats SET latest_bot_message_id = %s, latest_bot_message_text = %s WHERE chat_id = %s AND platform = %s;''',
           (message_id, message_text, chat_id, PLATFORM))
     conn.commit()
+    # MAX ids are strings like "mid.abc123". If the column is still numeric,
+    # MySQL quietly stores 0 and every later edit of that announcement fails,
+    # so check the value survived instead of finding out three commands later.
+    if message_id:
+        cur = _exec(conn, '''
+            SELECT latest_bot_message_id FROM Chats WHERE chat_id = %s AND platform = %s LIMIT 1;
+        ''', (chat_id, PLATFORM))
+        row = cur.fetchone()
+        stored = str(row[0]) if row and row[0] is not None else ''
+        if stored != str(message_id):
+            logger.error(
+                f"Message id was not stored for chat {chat_id}: sent {message_id!r}, "
+                f"database holds {stored!r}. The column Chats.latest_bot_message_id is "
+                f"most likely still numeric — fix it with: "
+                f"ALTER TABLE Chats MODIFY COLUMN latest_bot_message_id VARCHAR(64);"
+            )
     conn.close()
 
 def add_or_update_user(user_id, first_name="", last_name="", username=""):
@@ -1240,6 +1256,20 @@ def get_duty_stats(chat_id: int) -> List[Tuple[int, str, str, int]]:
     return result
 
 
+def _column_type(conn, table: str, column: str) -> Optional[str]:
+    """Actual SQL type of a column, or None when it does not exist."""
+    try:
+        cur = _exec(conn, '''
+            SELECT COLUMN_TYPE FROM information_schema.COLUMNS
+            WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = %s AND COLUMN_NAME = %s
+        ''', (table, column))
+        row = cur.fetchone()
+        return row[0] if row else None
+    except Exception as e:
+        logger.warning(f"Could not read type of {table}.{column}: {e}")
+        return None
+
+
 def migrate_schema():
     """Add new columns to existing tables if they don't exist yet."""
     conn = reconnect()
@@ -1257,18 +1287,35 @@ def migrate_schema():
     for table, col, definition in migrations:
         try:
             _exec(conn, f'ALTER TABLE {table} ADD COLUMN {col} {definition}')
-        except Exception:
-            pass  # column already exists
+            logger.info(f"Migration: added {table}.{col}")
+        except Exception as e:
+            # "Duplicate column name" simply means the migration already ran
+            if 'duplicate column' not in str(e).lower():
+                logger.warning(f"Migration: could not add {table}.{col}: {e}")
 
-    # Type change migrations (BIGINT -> VARCHAR for string message IDs)
+    # Type change migrations (BIGINT -> VARCHAR for string message IDs).
+    # This one matters: MAX message ids look like "mid.abc123", and a numeric
+    # column stores them as 0, so every later edit of that message fails.
     type_changes = [
         ('Chats', 'latest_bot_message_id', 'VARCHAR(64)'),
     ]
     for table, col, new_type in type_changes:
+        current = _column_type(conn, table, col)
+        if current is None:
+            continue
+        if new_type.split('(')[0].lower() in current.lower():
+            continue  # already the right type
         try:
             _exec(conn, f'ALTER TABLE {table} MODIFY COLUMN {col} {new_type}')
-        except Exception:
-            pass  # column doesn't exist or already correct type
+            conn.commit()
+            logger.info(f"Migration: {table}.{col} changed from {current} to {new_type}")
+        except Exception as e:
+            logger.error(
+                f"Migration FAILED: {table}.{col} is {current} but must be {new_type}: {e}. "
+                f"String message ids are stored as 0 in a numeric column, so the bot "
+                f"cannot edit its own announcements. Fix it by hand with: "
+                f"ALTER TABLE {table} MODIFY COLUMN {col} {new_type};"
+            )
     conn.close()
 
 def init_database():

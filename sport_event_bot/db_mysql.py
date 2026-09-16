@@ -1258,8 +1258,11 @@ def migrate_schema():
     for table, col, definition in migrations:
         try:
             _exec(conn, f'ALTER TABLE {table} ADD COLUMN {col} {definition}')
-        except Exception:
-            pass  # column already exists
+            logger.info(f"Migration: added {table}.{col}")
+        except Exception as e:
+            # "Duplicate column name" simply means the migration already ran
+            if 'duplicate column' not in str(e).lower():
+                logger.warning(f"Migration: could not add {table}.{col}: {e}")
     conn.close()
 
 def init_database():
