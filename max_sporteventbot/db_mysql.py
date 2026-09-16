@@ -1386,6 +1386,26 @@ def migrate_schema():
                 f"ADD PRIMARY KEY ({', '.join(wanted)});"
             )
 
+    # Before the primary key included platform, one bot's message id could land
+    # in the other platform's row (a Telegram row holding "mid.abc", or a MAX
+    # row holding a numeric id). Such an id is unusable — a bot cannot edit
+    # another messenger's message — so clear it and let the next command post a
+    # fresh announcement.
+    try:
+        cur = _exec(conn, '''
+            UPDATE Chats SET latest_bot_message_id = '', latest_bot_message_text = NULL
+            WHERE (platform = 'telegram' AND latest_bot_message_id LIKE %s)
+               OR (platform = 'max' AND latest_bot_message_id REGEXP %s)
+        ''', ('mid.%', '^[0-9]+$'))
+        conn.commit()
+        if getattr(cur, 'rowcount', 0) > 0:
+            logger.info(
+                f"Migration: cleared {cur.rowcount} message id(s) that were stored "
+                f"under the wrong platform"
+            )
+    except Exception as e:
+        logger.warning(f"Could not clear cross-platform message ids: {e}")
+
     conn.close()
 
 def init_database():
