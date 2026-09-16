@@ -1211,6 +1211,7 @@ async def _announce_duty(update, context, translate, user_id, platform, name, vo
 
     # Redraw the existing announcement so the broom shows up there. If there is
     # no live announcement to edit, fall back to posting a fresh one.
+    had_announcement = bool(db.get_latest_bot_message_id(this_chat_id))
     refreshed = await _refresh_event_message(context, this_chat_id, translate)
 
     mention = _duty_mention(user_id, platform, name)
@@ -1220,7 +1221,7 @@ async def _announce_duty(update, context, translate, user_id, platform, name, vo
         text = '🧹 ' + translate('On duty for this event') + f': {mention}'
     await context.bot.send_message(this_chat_id, text, parse_mode=ParseMode.HTML)
 
-    if not refreshed:
+    if not refreshed and not had_announcement:
         await show_info(update, context)
 
     # Mirror into the linked MAX chat: update its event message and announce
