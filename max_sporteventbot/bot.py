@@ -837,7 +837,6 @@ async def show_info_impl(event: MessageCreated, bot=None):
                 text=old_msg_text,
                 attachments=[],
                 format=ParseMode.HTML,
-                disable_link_preview=True,
             )
         except Exception as e:
             logger.info(f"Could not remove buttons from old message: {e}")
@@ -1208,7 +1207,6 @@ async def _refresh_event_message(bot_instance, chat_id: int) -> bool:
             text=text,
             attachments=[keyboard] if keyboard else None,
             format=ParseMode.HTML,
-            disable_link_preview=True,
         )
         db.save_latest_bot_message(chat_id, message_id, text)
         return True
@@ -1458,6 +1456,16 @@ async def handle_callback(event: MessageCallback):
 
     logger.info(f"Callback: chat_id={chat_id}, user={user.user_id}, action={callback_data}")
 
+    # Buttons may still sit under an older announcement whose event has since
+    # been fixed or removed. Acting on them would redraw that message without
+    # the strikethrough and hand the buttons back, so just say it is over.
+    if not db.get_event_text(chat_id):
+        try:
+            await event.ack(notification='Событие уже завершено')
+        except Exception as e:
+            logger.info(f"Could not ack callback on closed event: {e}")
+        return
+
     notification = None  # toast popup text (seen only by the presser)
     chat_message = None  # message posted to the chat (seen by everyone)
 
@@ -1486,6 +1494,7 @@ async def handle_callback(event: MessageCallback):
                 'Payment confirmed!': 'Оплата подтверждена!',
                 'Payment for friend confirmed!': 'Оплата за друга подтверждена!',
                 'Payment already confirmed.': 'Оплата уже подтверждена.',
+                'You are on duty — you play for free.': 'Вы дежурный — за игру не платите.',
             }
             notification = msg_map.get(result['message'], result['message'])
     except Exception as e:

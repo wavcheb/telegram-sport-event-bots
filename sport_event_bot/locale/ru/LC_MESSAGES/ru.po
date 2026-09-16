@@ -383,3 +383,11 @@ msgstr "Связь аккаунтов разорвана."
 #: bot.py
 msgid "Your account is not linked to another one."
 msgstr "Ваш аккаунт не связан с другим."
+
+#: bot.py
+msgid "You are on duty — you play for free."
+msgstr "Вы дежурный — за игру не платите."
+
+#: bot.py
+msgid "This event is already finished."
+msgstr "Событие уже завершено."

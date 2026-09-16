@@ -1340,6 +1340,26 @@ def has_user_invited_legioneer(chat_id: int, user_id: int) -> bool:
     conn.close()
     return bool(row and row[0] > 0)
 
+def get_unpaid_legioneer(chat_id: int, user_id: int) -> Optional[int]:
+    """First unpaid guest invited by this user, or None. Telegram guests use
+    the synthetic ids 10-29."""
+    conn = reconnect()
+    cur = _exec(conn, '''
+        SELECT p.user_id
+        FROM Participants p
+        WHERE p.event_id = (
+            SELECT event_id FROM Events WHERE status = "Open" AND chat_id = %s AND platform = %s ORDER BY event_id DESC LIMIT 1
+        )
+        AND p.user_id BETWEEN 10 AND 29
+        AND p.invited_by = %s
+        AND p.paid = FALSE
+        ORDER BY p.user_id ASC
+        LIMIT 1
+    ''', (chat_id, PLATFORM, user_id))
+    row = cur.fetchone()
+    conn.close()
+    return row[0] if row else None
+
 def process_payment(chat_id: int, user_id: int) -> dict:
     """
     Handle PAY button press. Returns dict with 'message' and 'success' keys.
@@ -1348,16 +1368,29 @@ def process_payment(chat_id: int, user_id: int) -> dict:
     if user_id not in (get_event_users(chat_id) or []):
         return {'message': 'You must be registered for the event to confirm payment.', 'success': False}
 
+    # The duty player plays for free, so their press must not be spent on
+    # themselves — it goes straight to a guest they brought.
+    on_duty = False
+    duty = get_event_duty(chat_id)
+    if duty:
+        on_duty = is_same_person(duty[0], duty[1], user_id, PLATFORM)
+
     already_paid = get_payment_status(chat_id, user_id)
-    if not already_paid:
+    if not already_paid and not on_duty:
         set_payment_status(chat_id, user_id, True)
         record_payment_log(chat_id, user_id, for_friend=False)
         return {'message': 'Payment confirmed!', 'success': True}
 
-    if has_user_invited_legioneer(chat_id, user_id):
+    # Mark the guest paid, not just the log line: the list shows a guest as
+    # settled from their own paid flag.
+    legioneer_id = get_unpaid_legioneer(chat_id, user_id)
+    if legioneer_id:
+        set_payment_status(chat_id, legioneer_id, True)
         record_payment_log(chat_id, user_id, for_friend=True)
         return {'message': 'Payment for friend confirmed!', 'success': True}
 
+    if on_duty and not already_paid:
+        return {'message': 'You are on duty — you play for free.', 'success': False}
     return {'message': 'Payment already confirmed.', 'success': False}
 
 if __name__ == '__main__':

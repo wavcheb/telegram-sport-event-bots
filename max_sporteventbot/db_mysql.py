@@ -1377,8 +1377,15 @@ def process_payment(chat_id: int, user_id: int) -> dict:
     if user_id not in (get_event_users(chat_id) or []):
         return {'message': 'You must be registered for the event to confirm payment.', 'success': False}
 
+    # The duty player plays for free, so their press must not be spent on
+    # themselves — it goes straight to a guest they brought.
+    on_duty = False
+    duty = get_event_duty(chat_id)
+    if duty:
+        on_duty = is_same_person(duty[0], duty[1], user_id, PLATFORM)
+
     already_paid = get_payment_status(chat_id, user_id)
-    if not already_paid:
+    if not already_paid and not on_duty:
         set_payment_status(chat_id, user_id, True)
         record_payment_log(chat_id, user_id, for_friend=False)
         return {'message': 'Payment confirmed!', 'success': True}
@@ -1390,6 +1397,8 @@ def process_payment(chat_id: int, user_id: int) -> dict:
         record_payment_log(chat_id, user_id, for_friend=True)
         return {'message': 'Payment for friend confirmed!', 'success': True}
 
+    if on_duty and not already_paid:
+        return {'message': 'You are on duty — you play for free.', 'success': False}
     return {'message': 'Payment already confirmed.', 'success': False}
 
 if __name__ == '__main__':
