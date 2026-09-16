@@ -394,6 +394,13 @@ async def button(update, context):
     translate = context.user_data['translate']
     db.add_or_update_user(user_id, query.from_user.first_name, query.from_user.last_name, query.from_user.username)
 
+    # Buttons may still sit under an older announcement whose event has since
+    # been fixed or removed. Acting on them would redraw that message without
+    # the strikethrough and hand the buttons back, so just say it is over.
+    if not db.get_event_text(this_chat_id):
+        await query.answer(translate('This event is already finished.'))
+        return
+
     if query.data == "ADD":
         db.apply_for_participation_in_the_event(this_chat_id, user_id)
     elif query.data == "REMOVE":
