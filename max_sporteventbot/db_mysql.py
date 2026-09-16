@@ -315,26 +315,46 @@ def get_latest_bot_message_text(chat_id) -> str:
     return row[0] if row and row[0] is not None else ""
 
 def save_latest_bot_message(chat_id, message_id, message_text):
+    """Remember the announcement the bot can later edit.
+
+    Uses an upsert: a plain UPDATE silently does nothing when the chat has no
+    row yet, which would leave the bot unable to edit its own announcement.
+    """
     conn = reconnect()
-    _exec(conn, '''UPDATE Chats SET latest_bot_message_id = %s, latest_bot_message_text = %s WHERE chat_id = %s AND platform = %s;''',
-          (message_id, message_text, chat_id, PLATFORM))
-    conn.commit()
-    # MAX ids are strings like "mid.abc123". If the column is still numeric,
-    # MySQL quietly stores 0 and every later edit of that announcement fails,
-    # so check the value survived instead of finding out three commands later.
-    if message_id:
+    try:
         cur = _exec(conn, '''
-            SELECT latest_bot_message_id FROM Chats WHERE chat_id = %s AND platform = %s LIMIT 1;
-        ''', (chat_id, PLATFORM))
-        row = cur.fetchone()
-        stored = str(row[0]) if row and row[0] is not None else ''
-        if stored != str(message_id):
-            logger.error(
-                f"Message id was not stored for chat {chat_id}: sent {message_id!r}, "
-                f"database holds {stored!r}. The column Chats.latest_bot_message_id is "
-                f"most likely still numeric — fix it with: "
-                f"ALTER TABLE Chats MODIFY COLUMN latest_bot_message_id VARCHAR(64);"
-            )
+            INSERT INTO Chats (chat_id, platform, latest_bot_message_id, latest_bot_message_text)
+            VALUES (%s, %s, %s, %s)
+            ON DUPLICATE KEY UPDATE
+                latest_bot_message_id = VALUES(latest_bot_message_id),
+                latest_bot_message_text = VALUES(latest_bot_message_text);
+        ''', (chat_id, PLATFORM, message_id, message_text))
+        conn.commit()
+        rows = getattr(cur, 'rowcount', -1)
+    except Exception as e:
+        logger.error(f"Could not store message id {message_id!r} for chat {chat_id}: {e}")
+        conn.close()
+        return
+
+    # MAX ids are strings like "mid.abc123". Read the value back: if it did not
+    # survive, editing this announcement will fail later with no clue why.
+    if message_id:
+        try:
+            cur = _exec(conn, '''
+                SELECT latest_bot_message_id FROM Chats WHERE chat_id = %s AND platform = %s LIMIT 1;
+            ''', (chat_id, PLATFORM))
+            row = cur.fetchone()
+            stored = str(row[0]) if row and row[0] is not None else ''
+            if stored != str(message_id):
+                logger.error(
+                    f"Message id did not persist for chat {chat_id} (platform={PLATFORM}, "
+                    f"database={MYSQL_CFG['database']}, rows affected={rows}): "
+                    f"sent {message_id!r}, stored {stored!r}. Check the column type with "
+                    f"SHOW COLUMNS FROM Chats LIKE 'latest_bot_message_id'; it must be "
+                    f"VARCHAR(64), not a numeric type."
+                )
+        except Exception as e:
+            logger.warning(f"Could not verify stored message id for chat {chat_id}: {e}")
     conn.close()
 
 def add_or_update_user(user_id, first_name="", last_name="", username=""):
@@ -1320,6 +1340,10 @@ def migrate_schema():
 
 def init_database():
     """Create all tables and run schema migrations."""
+    logger.info(
+        f"Database: {MYSQL_CFG['database']} on {MYSQL_CFG['host']} "
+        f"as {MYSQL_CFG['user']} (platform={PLATFORM})"
+    )
     create_table_users()
     create_table_chats()
     create_table_events()
