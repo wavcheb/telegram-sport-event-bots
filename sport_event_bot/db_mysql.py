@@ -386,10 +386,19 @@ def get_all_chat_ids() -> Set[int]:
     return set(int(row[0]) for row in all_rows)
 
 def register_new_chat_id(chat_id: int, lang: str):
+    """Create the chat's row. INSERT IGNORE used to hide real failures here —
+    e.g. a NOT NULL column added to Chats outside the bot's schema — leaving
+    the chat with no row at all, so nothing about it could be remembered."""
     language_code = lang or ''
     conn = reconnect()
-    _exec(conn, 'INSERT IGNORE INTO Chats(chat_id, platform, lang) VALUES (%s, %s, %s)', (chat_id, PLATFORM, language_code))
-    conn.commit()
+    try:
+        _exec(conn, '''
+            INSERT INTO Chats (chat_id, platform, lang) VALUES (%s, %s, %s)
+            ON DUPLICATE KEY UPDATE lang = VALUES(lang);
+        ''', (chat_id, PLATFORM, language_code))
+        conn.commit()
+    except Exception as e:
+        logger.error(f"Could not register chat {chat_id} (platform={PLATFORM}): {e}")
     conn.close()
 
 def get_only_chat_participants(chat_id: int) -> List[int]:
