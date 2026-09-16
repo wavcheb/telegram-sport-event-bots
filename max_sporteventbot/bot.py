@@ -949,6 +949,7 @@ async def cmd_fix(event: MessageCreated):
     # has access to event data. Rendering is inside the try as well: a failure
     # there must not stop the event from being closed below.
     old_msg_id = db.get_latest_bot_message_id(chat_id)
+    logger.info(f"fix: chat {chat_id} announcement id = {old_msg_id!r}")
     if old_msg_id:
         try:
             payment_url = db.get_event_payment_url(chat_id)
@@ -963,7 +964,10 @@ async def cmd_fix(event: MessageCreated):
             )
             db.save_latest_bot_message(chat_id, old_msg_id, closed_text)
         except Exception as e:
-            logger.warning(f"Could not mark event as closed on fix: {e}")
+            logger.warning(
+                f"fix: could not edit announcement {old_msg_id} in chat {chat_id}: "
+                f"{type(e).__name__}: {e}"
+            )
             # At least take the buttons off the stale announcement
             try:
                 await event.bot.edit_message(
@@ -1197,11 +1201,12 @@ async def _refresh_event_message(bot_instance, chat_id: int) -> bool:
     with two button-bearing announcements after a duty is assigned."""
     message_id = db.get_latest_bot_message_id(chat_id)
     if not message_id:
+        logger.info(f"refresh: chat {chat_id} has no stored announcement id")
         return False
-    payment_url = db.get_event_payment_url(chat_id)
-    text = create_event_full_text(chat_id, payment_url).strip() or " "
-    keyboard = build_event_keyboard()
     try:
+        payment_url = db.get_event_payment_url(chat_id)
+        text = create_event_full_text(chat_id, payment_url).strip() or " "
+        keyboard = build_event_keyboard()
         await bot_instance.edit_message(
             message_id=message_id,
             text=text,
@@ -1209,9 +1214,13 @@ async def _refresh_event_message(bot_instance, chat_id: int) -> bool:
             format=ParseMode.HTML,
         )
         db.save_latest_bot_message(chat_id, message_id, text)
+        logger.info(f"refresh: edited announcement {message_id} in chat {chat_id}")
         return True
     except Exception as e:
-        logger.warning(f"Could not refresh event message: {e}")
+        logger.warning(
+            f"refresh: could not edit announcement {message_id} in chat {chat_id}: "
+            f"{type(e).__name__}: {e}"
+        )
         return False
 
 
@@ -1223,6 +1232,7 @@ async def _announce_duty(event: MessageCreated, user_id: int, platform: str,
 
     # Redraw the existing announcement so the broom shows up there. If there is
     # no live announcement to edit, fall back to posting a fresh one.
+    had_announcement = bool(db.get_latest_bot_message_id(chat_id))
     refreshed = await _refresh_event_message(event.bot, chat_id)
 
     platform_mark = '' if platform == db.PLATFORM else f' [{_escape_html(platform)}]'
@@ -1234,7 +1244,7 @@ async def _announce_duty(event: MessageCreated, user_id: int, platform: str,
         chat_id=chat_id, text=text, format=ParseMode.HTML, disable_link_preview=True
     )
 
-    if not refreshed:
+    if not refreshed and not had_announcement:
         await show_info_impl(event)
 
     # Mirror into the linked Telegram chat: update its event message and announce.
