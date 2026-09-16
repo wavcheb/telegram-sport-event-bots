@@ -13,3 +13,6 @@ sport_event_bot/token.txt
 max_sporteventbot/logs/
 max_sporteventbot/token.txt
 web/config.php
+__pycache__/
+venv/
+*.mo~

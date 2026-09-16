@@ -318,10 +318,24 @@ def get_latest_bot_message_text(chat_id) -> str:
     return row[0] if row and row[0] is not None else ""
 
 def save_latest_bot_message(chat_id, message_id, message_text):
+    """Remember the announcement the bot can later edit.
+
+    An upsert, not an UPDATE: a chat without a row yet would otherwise be
+    updated zero times and report success, leaving the bot unable to edit its
+    own announcement.
+    """
     conn = reconnect()
-    _exec(conn, '''UPDATE Chats SET latest_bot_message_id = %s, latest_bot_message_text = %s WHERE chat_id = %s AND platform = %s;''',
-          (message_id, message_text, chat_id, PLATFORM))
-    conn.commit()
+    try:
+        _exec(conn, '''
+            INSERT INTO Chats (chat_id, platform, latest_bot_message_id, latest_bot_message_text)
+            VALUES (%s, %s, %s, %s)
+            ON DUPLICATE KEY UPDATE
+                latest_bot_message_id = VALUES(latest_bot_message_id),
+                latest_bot_message_text = VALUES(latest_bot_message_text);
+        ''', (chat_id, PLATFORM, message_id, message_text))
+        conn.commit()
+    except Exception as e:
+        logger.error(f"Could not store message id {message_id!r} for chat {chat_id}: {e}")
     conn.close()
 
 def add_or_update_user(user_id, first_name="", last_name="", username=""):
@@ -1264,38 +1278,59 @@ def _primary_key_columns(conn, table: str) -> List[str]:
         return []
 
 
-def migrate_schema():
-    """Add new columns to existing tables if they don't exist yet."""
-    conn = reconnect()
-    migrations = [
+# ==================== Schema migrations ====================
+# A fresh database gets the correct schema from the CREATE TABLE statements
+# above. Everything below only matters when upgrading a database created by an
+# earlier version of the bots; each step is a no-op once applied.
+
+
+def _migrate_add_columns(conn):
+    """Columns that were added after the first release."""
+    added_columns = [
         ('Participants', 'paid_at', 'DATETIME DEFAULT NULL'),
         ('Participants', 'invited_by', 'BIGINT DEFAULT NULL'),
         ('Events', 'payment_url', 'TEXT DEFAULT NULL'),
         ('Events', 'telegraph_url', 'TEXT DEFAULT NULL'),
-        # Platform support migrations
         ('Users', 'platform', "VARCHAR(16) NOT NULL DEFAULT 'telegram'"),
         ('Chats', 'platform', "VARCHAR(16) NOT NULL DEFAULT 'telegram'"),
         ('Events', 'platform', "VARCHAR(16) NOT NULL DEFAULT 'telegram'"),
         ('Penalties', 'platform', "VARCHAR(16) NOT NULL DEFAULT 'telegram'"),
     ]
-    for table, col, definition in migrations:
+    for table, col, definition in added_columns:
         try:
             _exec(conn, f'ALTER TABLE {table} ADD COLUMN {col} {definition}')
             logger.info(f"Migration: added {table}.{col}")
         except Exception as e:
-            # "Duplicate column name" simply means the migration already ran
+            # "Duplicate column name" just means this ran before
             if 'duplicate column' not in str(e).lower():
                 logger.warning(f"Migration: could not add {table}.{col}: {e}")
 
-    # Rows are per (id, platform): the same chat or user id can exist on both
-    # messengers. An older schema keyed these tables by the id alone, so a MAX
-    # row collides with the Telegram row of the same id — an upsert then
-    # overwrites the other platform's row and the second row never exists.
-    composite_keys = [
-        ('Chats', ['chat_id', 'platform']),
-        ('Users', ['user_id', 'platform']),
-    ]
-    for table, wanted in composite_keys:
+
+def _migrate_column_types(conn):
+    """MAX message ids are strings like "mid.abc123". A numeric column stores
+    them as 0, after which the bot can never edit its own announcement."""
+    for table, col, new_type in [('Chats', 'latest_bot_message_id', 'VARCHAR(64)')]:
+        current = _column_type(conn, table, col)
+        if current is None or new_type.split('(')[0].lower() in current.lower():
+            continue
+        try:
+            _exec(conn, f'ALTER TABLE {table} MODIFY COLUMN {col} {new_type}')
+            conn.commit()
+            logger.info(f"Migration: {table}.{col} changed from {current} to {new_type}")
+        except Exception as e:
+            logger.error(
+                f"Migration FAILED: {table}.{col} is {current} but must be "
+                f"{new_type}: {e}. Fix it by hand with: "
+                f"ALTER TABLE {table} MODIFY COLUMN {col} {new_type};"
+            )
+
+
+def _migrate_primary_keys(conn):
+    """Chats and Users are keyed by (id, platform): the same chat or user id
+    can exist on both messengers. Keyed by the id alone, one bot's row is the
+    other bot's row — each write silently overwrites the other platform."""
+    for table, wanted in [('Chats', ['chat_id', 'platform']),
+                          ('Users', ['user_id', 'platform'])]:
         current = _primary_key_columns(conn, table)
         if not current or current == wanted:
             continue
@@ -1313,11 +1348,10 @@ def migrate_schema():
                 f"ADD PRIMARY KEY ({', '.join(wanted)});"
             )
 
-    # Before the primary key included platform, one bot's message id could land
-    # in the other platform's row (a Telegram row holding "mid.abc", or a MAX
-    # row holding a numeric id). Such an id is unusable — a bot cannot edit
-    # another messenger's message — so clear it and let the next command post a
-    # fresh announcement.
+
+def _migrate_clear_cross_platform_ids(conn):
+    """Drop message ids left in the wrong platform's row by that collision: a
+    bot cannot edit a message belonging to the other messenger."""
     try:
         cur = _exec(conn, '''
             UPDATE Chats SET latest_bot_message_id = '', latest_bot_message_text = NULL
@@ -1326,13 +1360,19 @@ def migrate_schema():
         ''', ('mid.%', '^[0-9]+$'))
         conn.commit()
         if getattr(cur, 'rowcount', 0) > 0:
-            logger.info(
-                f"Migration: cleared {cur.rowcount} message id(s) that were stored "
-                f"under the wrong platform"
-            )
+            logger.info(f"Migration: cleared {cur.rowcount} message id(s) stored "
+                        f"under the wrong platform")
     except Exception as e:
         logger.warning(f"Could not clear cross-platform message ids: {e}")
 
+
+def migrate_schema():
+    """Bring an older database up to the current schema."""
+    conn = reconnect()
+    _migrate_add_columns(conn)
+    _migrate_column_types(conn)
+    _migrate_primary_keys(conn)
+    _migrate_clear_cross_platform_ids(conn)
     conn.close()
 
 def init_database():
