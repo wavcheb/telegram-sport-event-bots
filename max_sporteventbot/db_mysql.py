@@ -315,10 +315,46 @@ def get_latest_bot_message_text(chat_id) -> str:
     return row[0] if row and row[0] is not None else ""
 
 def save_latest_bot_message(chat_id, message_id, message_text):
+    """Remember the announcement the bot can later edit.
+
+    Uses an upsert: a plain UPDATE silently does nothing when the chat has no
+    row yet, which would leave the bot unable to edit its own announcement.
+    """
     conn = reconnect()
-    _exec(conn, '''UPDATE Chats SET latest_bot_message_id = %s, latest_bot_message_text = %s WHERE chat_id = %s AND platform = %s;''',
-          (message_id, message_text, chat_id, PLATFORM))
-    conn.commit()
+    try:
+        cur = _exec(conn, '''
+            INSERT INTO Chats (chat_id, platform, latest_bot_message_id, latest_bot_message_text)
+            VALUES (%s, %s, %s, %s)
+            ON DUPLICATE KEY UPDATE
+                latest_bot_message_id = VALUES(latest_bot_message_id),
+                latest_bot_message_text = VALUES(latest_bot_message_text);
+        ''', (chat_id, PLATFORM, message_id, message_text))
+        conn.commit()
+        rows = getattr(cur, 'rowcount', -1)
+    except Exception as e:
+        logger.error(f"Could not store message id {message_id!r} for chat {chat_id}: {e}")
+        conn.close()
+        return
+
+    # MAX ids are strings like "mid.abc123". Read the value back: if it did not
+    # survive, editing this announcement will fail later with no clue why.
+    if message_id:
+        try:
+            cur = _exec(conn, '''
+                SELECT latest_bot_message_id FROM Chats WHERE chat_id = %s AND platform = %s LIMIT 1;
+            ''', (chat_id, PLATFORM))
+            row = cur.fetchone()
+            stored = str(row[0]) if row and row[0] is not None else ''
+            if stored != str(message_id):
+                logger.error(
+                    f"Message id did not persist for chat {chat_id} (platform={PLATFORM}, "
+                    f"database={MYSQL_CFG['database']}, rows affected={rows}): "
+                    f"sent {message_id!r}, stored {stored!r}. Check the column type with "
+                    f"SHOW COLUMNS FROM Chats LIKE 'latest_bot_message_id'; it must be "
+                    f"VARCHAR(64), not a numeric type."
+                )
+        except Exception as e:
+            logger.warning(f"Could not verify stored message id for chat {chat_id}: {e}")
     conn.close()
 
 def add_or_update_user(user_id, first_name="", last_name="", username=""):
@@ -383,10 +419,19 @@ def get_all_chat_ids() -> Set[int]:
     return set(int(row[0]) for row in all_rows)
 
 def register_new_chat_id(chat_id: int, lang: str):
+    """Create the chat's row. INSERT IGNORE used to hide real failures here —
+    e.g. a NOT NULL column added to Chats outside the bot's schema — leaving
+    the chat with no row at all, so nothing about it could be remembered."""
     language_code = lang or ''
     conn = reconnect()
-    _exec(conn, 'INSERT IGNORE INTO Chats(chat_id, platform, lang) VALUES (%s, %s, %s)', (chat_id, PLATFORM, language_code))
-    conn.commit()
+    try:
+        _exec(conn, '''
+            INSERT INTO Chats (chat_id, platform, lang) VALUES (%s, %s, %s)
+            ON DUPLICATE KEY UPDATE lang = VALUES(lang);
+        ''', (chat_id, PLATFORM, language_code))
+        conn.commit()
+    except Exception as e:
+        logger.error(f"Could not register chat {chat_id} (platform={PLATFORM}): {e}")
     conn.close()
 
 def get_only_chat_participants(chat_id: int) -> List[int]:
@@ -1240,6 +1285,20 @@ def get_duty_stats(chat_id: int) -> List[Tuple[int, str, str, int]]:
     return result
 
 
+def _column_type(conn, table: str, column: str) -> Optional[str]:
+    """Actual SQL type of a column, or None when it does not exist."""
+    try:
+        cur = _exec(conn, '''
+            SELECT COLUMN_TYPE FROM information_schema.COLUMNS
+            WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = %s AND COLUMN_NAME = %s
+        ''', (table, column))
+        row = cur.fetchone()
+        return row[0] if row else None
+    except Exception as e:
+        logger.warning(f"Could not read type of {table}.{column}: {e}")
+        return None
+
+
 def migrate_schema():
     """Add new columns to existing tables if they don't exist yet."""
     conn = reconnect()
@@ -1257,22 +1316,43 @@ def migrate_schema():
     for table, col, definition in migrations:
         try:
             _exec(conn, f'ALTER TABLE {table} ADD COLUMN {col} {definition}')
-        except Exception:
-            pass  # column already exists
+            logger.info(f"Migration: added {table}.{col}")
+        except Exception as e:
+            # "Duplicate column name" simply means the migration already ran
+            if 'duplicate column' not in str(e).lower():
+                logger.warning(f"Migration: could not add {table}.{col}: {e}")
 
-    # Type change migrations (BIGINT -> VARCHAR for string message IDs)
+    # Type change migrations (BIGINT -> VARCHAR for string message IDs).
+    # This one matters: MAX message ids look like "mid.abc123", and a numeric
+    # column stores them as 0, so every later edit of that message fails.
     type_changes = [
         ('Chats', 'latest_bot_message_id', 'VARCHAR(64)'),
     ]
     for table, col, new_type in type_changes:
+        current = _column_type(conn, table, col)
+        if current is None:
+            continue
+        if new_type.split('(')[0].lower() in current.lower():
+            continue  # already the right type
         try:
             _exec(conn, f'ALTER TABLE {table} MODIFY COLUMN {col} {new_type}')
-        except Exception:
-            pass  # column doesn't exist or already correct type
+            conn.commit()
+            logger.info(f"Migration: {table}.{col} changed from {current} to {new_type}")
+        except Exception as e:
+            logger.error(
+                f"Migration FAILED: {table}.{col} is {current} but must be {new_type}: {e}. "
+                f"String message ids are stored as 0 in a numeric column, so the bot "
+                f"cannot edit its own announcements. Fix it by hand with: "
+                f"ALTER TABLE {table} MODIFY COLUMN {col} {new_type};"
+            )
     conn.close()
 
 def init_database():
     """Create all tables and run schema migrations."""
+    logger.info(
+        f"Database: {MYSQL_CFG['database']} on {MYSQL_CFG['host']} "
+        f"as {MYSQL_CFG['user']} (platform={PLATFORM})"
+    )
     create_table_users()
     create_table_chats()
     create_table_events()
