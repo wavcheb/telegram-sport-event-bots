@@ -1285,6 +1285,20 @@ def get_duty_stats(chat_id: int) -> List[Tuple[int, str, str, int]]:
     return result
 
 
+def _primary_key_columns(conn, table: str) -> List[str]:
+    """Columns of the table's PRIMARY KEY, in order."""
+    try:
+        cur = _exec(conn, '''
+            SELECT COLUMN_NAME FROM information_schema.STATISTICS
+            WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = %s AND INDEX_NAME = 'PRIMARY'
+            ORDER BY SEQ_IN_INDEX
+        ''', (table,))
+        return [row[0] for row in cur.fetchall()]
+    except Exception as e:
+        logger.warning(f"Could not read primary key of {table}: {e}")
+        return []
+
+
 def _column_type(conn, table: str, column: str) -> Optional[str]:
     """Actual SQL type of a column, or None when it does not exist."""
     try:
@@ -1345,6 +1359,33 @@ def migrate_schema():
                 f"cannot edit its own announcements. Fix it by hand with: "
                 f"ALTER TABLE {table} MODIFY COLUMN {col} {new_type};"
             )
+
+    # Rows are per (id, platform): the same chat or user id can exist on both
+    # messengers. An older schema keyed these tables by the id alone, so a MAX
+    # row collides with the Telegram row of the same id — an upsert then
+    # overwrites the other platform's row and the MAX row never exists.
+    composite_keys = [
+        ('Chats', ['chat_id', 'platform']),
+        ('Users', ['user_id', 'platform']),
+    ]
+    for table, wanted in composite_keys:
+        current = _primary_key_columns(conn, table)
+        if not current or current == wanted:
+            continue
+        try:
+            _exec(conn, f'ALTER TABLE {table} DROP PRIMARY KEY, '
+                        f'ADD PRIMARY KEY ({", ".join(wanted)})')
+            conn.commit()
+            logger.info(f"Migration: {table} primary key {current} -> {wanted}")
+        except Exception as e:
+            logger.error(
+                f"Migration FAILED: {table} primary key is {current} but must be "
+                f"{wanted}: {e}. Until this is fixed, rows of one platform "
+                f"overwrite the other's. Fix it by hand with: "
+                f"ALTER TABLE {table} DROP PRIMARY KEY, "
+                f"ADD PRIMARY KEY ({', '.join(wanted)});"
+            )
+
     conn.close()
 
 def init_database():
