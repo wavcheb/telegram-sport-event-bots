@@ -1607,6 +1607,22 @@ async def main():
 
     bot = Bot(api_token)
 
+    # Which files are actually loaded, and when they were last changed. A bot
+    # updated one file at a time otherwise fails in ways the code cannot explain.
+    for mod_name, mod in (('bot', sys.modules[__name__]), ('db_mysql', db)):
+        try:
+            path = mod.__file__
+            changed = datetime.datetime.fromtimestamp(os.path.getmtime(path))
+            logger.info(f"Loaded {mod_name}: {path} (modified {changed:%Y-%m-%d %H:%M:%S})")
+        except Exception as e:
+            logger.warning(f"Could not stat module {mod_name}: {e}")
+    if not hasattr(db, 'get_person_key'):
+        logger.error(
+            "db_mysql.py is out of date: it has no get_person_key(). Copy the "
+            "current db_mysql.py next to bot.py and restart — duty, identity and "
+            "message-id storage all need it."
+        )
+
     # Initialize database tables
     db.init_database()
 
