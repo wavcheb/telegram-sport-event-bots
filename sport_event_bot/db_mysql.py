@@ -1326,6 +1326,7 @@ def create_table_bank():
             chat_id BIGINT NOT NULL,
             platform VARCHAR(16) NOT NULL DEFAULT 'telegram',
             amount DECIMAL(12,2) NOT NULL,
+            currency VARCHAR(8) NOT NULL DEFAULT '',
             comment VARCHAR(255) DEFAULT '',
             updated_by BIGINT DEFAULT NULL,
             updated_at DATETIME NOT NULL,
@@ -1337,14 +1338,20 @@ def create_table_bank():
     conn.close()
 
 
-def set_bank_amount(chat_id: int, amount, user_id: int = None, comment: str = '') -> bool:
-    """Record a new balance for this chat (and its linked chat)."""
+def set_bank_amount(chat_id: int, amount, user_id: int = None, comment: str = '',
+                    currency: str = '') -> bool:
+    """Record a new balance for this chat (and its linked chat).
+
+    The currency travels with the amount, so groups in different countries can
+    each label their own kitty. Nothing is ever converted between currencies.
+    """
     conn = reconnect()
     try:
         _exec(conn, '''
-            INSERT INTO Bank (chat_id, platform, amount, comment, updated_by, updated_at)
-            VALUES (%s, %s, %s, %s, %s, %s)
-        ''', (chat_id, PLATFORM, amount, comment or '', user_id, datetime.datetime.now()))
+            INSERT INTO Bank (chat_id, platform, amount, currency, comment, updated_by, updated_at)
+            VALUES (%s, %s, %s, %s, %s, %s, %s)
+        ''', (chat_id, PLATFORM, amount, currency or '', comment or '', user_id,
+              datetime.datetime.now()))
         conn.commit()
         return True
     except Exception as e:
@@ -1356,18 +1363,33 @@ def set_bank_amount(chat_id: int, amount, user_id: int = None, comment: str = ''
 
 def get_bank_amount(chat_id: int):
     """Latest balance for this chat or its linked chat: (amount, updated_at,
-    updated_by, comment), or None when the treasurer never set one."""
+    updated_by, comment, currency), or None when nobody ever set one."""
     chats = _duty_chat_scope(chat_id)
     placeholders = ','.join(['%s'] * len(chats))
     conn = reconnect()
     cur = _exec(conn, f'''
-        SELECT amount, updated_at, updated_by, comment FROM Bank
+        SELECT amount, updated_at, updated_by, comment, currency FROM Bank
         WHERE chat_id IN ({placeholders})
         ORDER BY updated_at DESC, bank_id DESC LIMIT 1;
     ''', tuple(chats))
     row = cur.fetchone()
     conn.close()
     return row if row else None
+
+
+def get_bank_currency(chat_id: int) -> str:
+    """Currency this chat last recorded, or '' when it never has."""
+    chats = _duty_chat_scope(chat_id)
+    placeholders = ','.join(['%s'] * len(chats))
+    conn = reconnect()
+    cur = _exec(conn, f'''
+        SELECT currency FROM Bank
+        WHERE chat_id IN ({placeholders}) AND currency <> ''
+        ORDER BY updated_at DESC, bank_id DESC LIMIT 1;
+    ''', tuple(chats))
+    row = cur.fetchone()
+    conn.close()
+    return str(row[0]) if row and row[0] else ''
 
 
 # ==================== Schema migrations ====================
@@ -1380,6 +1402,7 @@ def _migrate_add_columns(conn):
     """Columns that were added after the first release."""
     added_columns = [
         ('Chats', 'page_secret', 'VARCHAR(64) DEFAULT NULL'),
+        ('Bank', 'currency', "VARCHAR(8) NOT NULL DEFAULT ''"),
         ('Participants', 'paid_at', 'DATETIME DEFAULT NULL'),
         ('Participants', 'invited_by', 'BIGINT DEFAULT NULL'),
         ('Events', 'payment_url', 'TEXT DEFAULT NULL'),

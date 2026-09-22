@@ -204,9 +204,20 @@ linked MAX chat too, and the announcement is posted in both.
 
 `/event_bank` shows what the treasurer is holding, `/event_bank 5200` records a
 new amount, and `/event_bank 5200 after the rent` adds a note. The value is
-shared with the linked chat and every update is kept as history. The currency
-sign comes from `BANK_CURRENCY` (default `₽`) — the bots never convert between
-currencies, so one sign is enough.
+shared with the linked chat and every update is kept as history.
+
+**The currency belongs to the chat**, since teams in different countries may
+share one bot. Give it once with an amount and the chat keeps it:
+
+```
+/event_bank 120000 ₸      → 120 000 ₸
+/event_bank 5200 KZT      → ISO codes work too
+/event_bank 98000         → stays in ₸, no need to repeat the label
+```
+
+Nothing is ever converted between currencies — the label only says what the
+number means. `BANK_CURRENCY` in `.env` is just the fallback for a chat that
+has never named one (default `₽`).
 
 The payments page also shows that balance and a duty table for a period —
 4 weeks by default, switchable with the 2/4/8/12 links or `?weeks=`.

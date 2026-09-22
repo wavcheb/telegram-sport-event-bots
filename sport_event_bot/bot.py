@@ -54,8 +54,8 @@ LOCALE_DIR = os.path.join(BOT_DIR, 'locale')
 # Payments page URL from environment (replaces Telegraph if set)
 PAYMENTS_PAGE_URL = os.getenv('PAYMENTS_PAGE_URL', '').strip()
 
-# Shown next to the kitty balance. A single sign is enough — the bots
-# never convert between currencies.
+# Fallback label for the kitty when a chat has not used one yet. Each chat
+# keeps its own currency, recorded with the amount — see /event_bank.
 BANK_CURRENCY = os.getenv('BANK_CURRENCY', '₽').strip()
 
 
@@ -536,32 +536,73 @@ def parse_datetime(str_datetime_in_free_form: str, translate: Callable[[str], st
         return None
     return found_date
 
+# Currency signs and ISO codes the bots recognise after an amount. Nothing is
+# ever converted — the sign is only a label, so each chat can use its own.
+CURRENCY_SIGNS = ('₽', '$', '€', '₸', '₴', '₾', '₺', '£', '¥', '₩', '₫', '₪',
+                  'zł', 'Kč', 'Ft', 'лв', 'сом', 'сум', 'руб', 'грн', 'тг')
+CURRENCY_WORDS = {
+    'рублей': '₽', 'рубля': '₽', 'рубль': '₽', 'руб.': '₽',
+    'тенге': '₸', 'гривен': '₴', 'гривны': '₴', 'гривна': '₴',
+    'долларов': '$', 'доллара': '$', 'евро': '€', 'манат': '₼',
+    'сомов': 'сом', 'сумов': 'сум', 'драм': '֏', 'лари': '₾',
+}
+
+
+def _split_currency(rest: str):
+    """Pull a currency label off the front of what follows the amount.
+
+    "5200 ₸ после зала" -> ('₸', 'после зала'); "5200 после зала" -> ('', ...).
+    Recognises signs, three-letter ISO codes and a few Russian words, so a
+    chat in any country can label its own kitty.
+    """
+    rest = (rest or '').strip()
+    if not rest:
+        return '', ''
+    head, _, tail = rest.partition(' ')
+    bare = head.strip().strip('.,')
+    if bare in CURRENCY_WORDS:
+        return CURRENCY_WORDS[bare], tail.strip()
+    if bare.lower() in CURRENCY_WORDS:
+        return CURRENCY_WORDS[bare.lower()], tail.strip()
+    if bare in CURRENCY_SIGNS:
+        return bare, tail.strip()
+    if len(bare) == 3 and bare.isalpha() and bare.isupper():
+        return bare, tail.strip()          # KZT, RUB, USD, ...
+    return '', rest
+
+
 def _parse_money(raw: str):
-    """Split "5200 after rent" into (Decimal, comment). Accepts 5200, 5 200,
-    5200.50 and 5200,50; returns (None, '') when there is no number."""
+    """Split "5200 ₸ после аренды" into (Decimal, currency, comment).
+
+    Accepts 5200, 5 200, 5200.50 and 5200,50; returns (None, '', '') when
+    there is no number to read.
+    """
     text = (raw or '').strip()
     m = re.match(r'^([-+]?[\d\s]+(?:[.,]\d{1,2})?)\s*(.*)$', text, re.S)
     if not m:
-        return None, ''
+        return None, '', ''
     number = m.group(1).replace(' ', '').replace('\u00a0', '').replace(',', '.')
     try:
-        return decimal.Decimal(number), m.group(2).strip()
+        amount = decimal.Decimal(number)
     except decimal.InvalidOperation:
-        return None, ''
+        return None, '', ''
+    currency, comment = _split_currency(m.group(2))
+    return amount, currency, comment
 
 
-def _format_money(amount) -> str:
-    """5200 -> "5 200 ₽" (the sign comes from BANK_CURRENCY)."""
+def _format_money(amount, currency: str = '') -> str:
+    """5200 -> "5 200 ₸", using the chat's own currency label."""
+    sign = currency or BANK_CURRENCY
     try:
         value = decimal.Decimal(amount)
     except Exception:
-        return f'{amount} {BANK_CURRENCY}'.strip()
+        return f'{amount} {sign}'.strip()
     quantised = value.quantize(decimal.Decimal('0.01'))
     if quantised == quantised.to_integral_value():
         body = f'{int(quantised):,}'.replace(',', '\u00a0')
     else:
         body = f'{quantised:,.2f}'.replace(',', '\u00a0')
-    return f'{body}\u00a0{BANK_CURRENCY}'.strip()
+    return f'{body}\u00a0{sign}'.strip()
 
 
 @logger.catch
@@ -1191,11 +1232,11 @@ async def show_or_set_bank(update, context):
                 translate('The kitty is empty so far.') + '\n/event_bank 5200'
             )
             return
-        amount, updated_at, updated_by, comment = current
+        amount, updated_at, updated_by, comment, currency = current
         who = db.get_duty_display_name(updated_by, db.PLATFORM) if updated_by else ''
         when = _coerce_to_datetime(updated_at)
         when_txt = when.strftime('%d.%m.%Y %H:%M') if when else str(updated_at)[:16]
-        text = f'💰 {translate("In the kitty")}: <b>{_format_money(amount)}</b>'
+        text = f'💰 {translate("In the kitty")}: <b>{_format_money(amount, currency)}</b>'
         if comment:
             text += f'\n{_html_escape(comment)}'
         text += f'\n<i>{translate("updated")} {when_txt}'
@@ -1205,16 +1246,18 @@ async def show_or_set_bank(update, context):
         await update.message.reply_text(text, parse_mode=ParseMode.HTML)
         return
 
-    amount, comment = _parse_money(raw)
+    amount, currency, comment = _parse_money(raw)
     if amount is None:
         await update.message.reply_text(
             translate('Could not read that amount. For example: /event_bank 5200')
         )
         return
+    # Keep the label this chat already uses unless a new one was given
+    currency = currency or db.get_bank_currency(this_chat_id)
 
     db.add_or_update_user(user.id, user.first_name, user.last_name, user.username)
-    if db.set_bank_amount(this_chat_id, amount, user.id, comment):
-        text = f'💰 {translate("In the kitty")}: <b>{_format_money(amount)}</b>'
+    if db.set_bank_amount(this_chat_id, amount, user.id, comment, currency):
+        text = f'💰 {translate("In the kitty")}: <b>{_format_money(amount, currency)}</b>'
         if comment:
             text += f'\n{_html_escape(comment)}'
         await update.message.reply_text(text, parse_mode=ParseMode.HTML)
@@ -1557,9 +1600,10 @@ Volunteer yourself for duty instead.
 /duty_stats
 Duty statistics: how many times each player has been on duty, and who never has.
 
-/event_bank [AMOUNT]
-Show what the community has in the kitty. With an amount - record a new one,
-e.g. /event_bank 5200 or /event_bank 5200 after the rent.
+/event_bank [AMOUNT] [CURRENCY] [NOTE]
+Show what the community has in the kitty, or record a new amount. The currency
+belongs to this chat and is remembered: /event_bank 5200 ₸, /event_bank 5200 KZT.
+After that /event_bank 4800 keeps the same label.
 
 /iam [CODE]
 Link your accounts across messengers so duty history follows you, not the

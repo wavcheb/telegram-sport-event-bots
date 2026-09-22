@@ -16,7 +16,11 @@ define('DB_PASS', 'your_password_here');
  * from one group simply do not open another group's event.
  */
 
-/** Sign shown next to the kitty balance. Match BANK_CURRENCY in the bots' .env. */
+/**
+ * Fallback label for the kitty. Each chat records its own currency with the
+ * amount (/event_bank 5200 ₸), so this is only used for entries made before
+ * that existed.
+ */
 define('BANK_CURRENCY', '₽');
 
 /** Default window, in weeks, for the duty table. */

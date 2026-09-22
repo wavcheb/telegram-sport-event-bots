@@ -211,7 +211,7 @@ try {
     if ($chat_scope) {
         $chat_ph = implode(',', array_fill(0, count($chat_scope), '?'));
         $stmt = $pdo->prepare("
-            SELECT amount, comment, updated_at FROM Bank
+            SELECT amount, comment, updated_at, currency FROM Bank
             WHERE chat_id IN ($chat_ph)
             ORDER BY updated_at DESC, bank_id DESC LIMIT 1
         ");
@@ -222,8 +222,12 @@ try {
     // Bank table may not exist yet on older deployments
 }
 
-function formatMoney($amount) {
-    $sign = defined('BANK_CURRENCY') ? BANK_CURRENCY : '';
+function formatMoney($amount, $currency = '') {
+    // The chat records its own currency with the amount; BANK_CURRENCY is only
+    // the fallback for a kitty entered before currencies were per chat.
+    $sign = $currency !== '' && $currency !== null
+        ? $currency
+        : (defined('BANK_CURRENCY') ? BANK_CURRENCY : '');
     $value = (float)$amount;
     $body = (abs($value - round($value)) < 0.005)
         ? number_format($value, 0, ',', ' ')
@@ -416,7 +420,7 @@ $unpaid_count = $total_participants - $paid_count;
     <?php if ($bank): ?>
         <div class="bank">
             <div>Касса сообщества</div>
-            <div class="bank-amount"><?= htmlspecialchars(formatMoney($bank['amount'])) ?></div>
+            <div class="bank-amount"><?= htmlspecialchars(formatMoney($bank['amount'], $bank['currency'] ?? '')) ?></div>
             <?php if (!empty($bank['comment'])): ?>
                 <div class="bank-note"><?= htmlspecialchars($bank['comment']) ?></div>
             <?php endif; ?>
