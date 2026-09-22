@@ -1699,6 +1699,26 @@ async def main():
                .read_timeout(30.0)
                .write_timeout(30.0)
                .pool_timeout(10.0))
+    # Some hosts publish only IPv6 for a Cloudflare Worker, and a server
+    # without working IPv6 then just hangs until the connect timeout. Binding
+    # the client to an IPv4 address forces the v4 path.
+    if os.getenv('TELEGRAM_FORCE_IPV4', '').strip().lower() in ('1', 'true', 'yes'):
+        import httpx
+        from telegram.request import HTTPXRequest
+
+        def _ipv4_request():
+            transport_kwargs = {'local_address': '0.0.0.0'}
+            if proxy_url:
+                transport_kwargs['proxy'] = proxy_url
+            return HTTPXRequest(
+                connect_timeout=20.0, read_timeout=30.0,
+                write_timeout=30.0, pool_timeout=10.0,
+                httpx_kwargs={'transport': httpx.AsyncHTTPTransport(**transport_kwargs)},
+            )
+
+        builder = builder.request(_ipv4_request()).get_updates_request(_ipv4_request())
+        logger.info("Forcing IPv4 for Telegram API connections")
+
     api_target = 'api.telegram.org'
     if tg_api_url:
         base = tg_api_url
