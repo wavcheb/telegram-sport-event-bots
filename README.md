@@ -38,6 +38,7 @@ Sport Event Bot (Telegram) and MAX Sport Event Bot can share a database and link
 - **Participant Sync**: See participants from both platforms in event messages
 - **Event Copy**: Copy events between platforms with `/event_copy`
 - **Shared Duty Roster**: `/event_duty` picks who is on duty (and plays for free); the pick is shared across both chats
+- **Community Kitty**: `/event_bank 5200` records what the treasurer holds; shown on the payments page
 - **One Player, Two Messengers**: `/iam` links a player's MAX and Telegram accounts so duty history follows the person, not the account
 - **Real-Time Sync**: When participants register in one platform, the message in linked chat updates automatically (requires cross-tokens in .env)
 

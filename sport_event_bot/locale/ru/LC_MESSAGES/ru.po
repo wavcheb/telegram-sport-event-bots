@@ -391,3 +391,23 @@ msgstr "Вы дежурный — за игру не платите."
 #: bot.py
 msgid "This event is already finished."
 msgstr "Событие уже завершено."
+
+#: bot.py
+msgid "In the kitty"
+msgstr "В кассе"
+
+#: bot.py
+msgid "The kitty is empty so far."
+msgstr "В кассе пока ничего не записано. Записать:"
+
+#: bot.py
+msgid "updated"
+msgstr "обновлено"
+
+#: bot.py
+msgid "Could not read that amount. For example: /event_bank 5200"
+msgstr "Не понял сумму. Например: /event_bank 5200"
+
+#: bot.py
+msgid "Could not store the amount, see the log."
+msgstr "Не удалось записать сумму, подробности в логе."

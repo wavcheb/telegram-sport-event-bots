@@ -17,6 +17,9 @@ import re
 import signal
 import gettext
 import json
+import hmac
+import hashlib
+import decimal
 import parsedatetime
 import urllib.request
 import urllib.parse
@@ -50,6 +53,29 @@ LOCALE_DIR = os.path.join(BOT_DIR, 'locale')
 
 # Payments page URL from environment (replaces Telegraph if set)
 PAYMENTS_PAGE_URL = os.getenv('PAYMENTS_PAGE_URL', '').strip()
+
+# Fallback label for the kitty when a chat has not used one yet. Each chat
+# keeps its own currency, recorded with the amount — see /event_bank.
+BANK_CURRENCY = os.getenv('BANK_CURRENCY', '₽').strip()
+
+
+def payments_page_link(event_id: int, chat_id: int) -> str:
+    """Link to the payments page, signed with this chat's own key.
+
+    The key is per chat, so a link handed to one group cannot be edited into
+    another group's event: their signatures come from different keys.
+    """
+    if not PAYMENTS_PAGE_URL:
+        return ''
+    link = f'{PAYMENTS_PAGE_URL}?event={event_id}'
+    secret = db.get_or_create_page_secret(chat_id)
+    if secret:
+        token = hmac.new(
+            secret.encode('utf-8'), str(event_id).encode('utf-8'), hashlib.sha256
+        ).hexdigest()[:16]
+        link += f'&t={token}'
+    return link
+
 
 # MAX bot token for cross-platform sync
 MAX_BOT_TOKEN = os.getenv('MAX_BOT_TOKEN', '').strip()
@@ -277,7 +303,7 @@ def create_max_message_text(chat_id: int, payment_url: str = None) -> str:
         try:
             event_id = db.get_event_id_by_chat_id(chat_id)
             primary_event_id = db.get_primary_event_id(event_id)
-            payments_link = f'{PAYMENTS_PAGE_URL}?event={primary_event_id}'
+            payments_link = payments_page_link(primary_event_id, chat_id)
             links.append(f'<a href="{_html_escape(payments_link)}">📊 Текущие платежи</a>')
         except:
             pass
@@ -297,28 +323,40 @@ def create_max_message_text(chat_id: int, payment_url: str = None) -> str:
     except:
         pass
 
+    # Duty player, matched across every account of that person
+    duty = db.get_event_duty(chat_id)
+    duty_accounts = set(
+        db.get_person_accounts(db.get_person_key(duty[0], duty[1]))
+    ) if duty else set()
+
     # Show local players (Telegram)
     for n, user_id in enumerate(players, start=1):
         if players_limit and n == players_limit + 1:
             text += '\n<i>Резерв:</i>\n'
         in_squad = '+' if not players_limit or n <= players_limit else '  '
         printable_name = _html_escape(db.compose_full_name(user_id))
-        paid = db.get_payment_status(chat_id, user_id)
-        payment_mark = ' 💰' if paid else ''
+        if (user_id, db.PLATFORM) in duty_accounts:
+            payment_mark = ' 🧹'
+        else:
+            payment_mark = ' 💰' if db.get_payment_status(chat_id, user_id) else ''
         platform_mark = ' [telegram]'
         text += f'{in_squad} {n}. {printable_name}{payment_mark}{platform_mark}\n'
 
     # Show linked players (MAX)
     if linked_players:
         start_n = len(players) + 1
-        for i, (user_id, platform, name) in enumerate(linked_players):
+        for i, (user_id, platform, name, paid) in enumerate(linked_players):
             n = start_n + i
             if players_limit and n == players_limit + 1:
                 text += '\n<i>Резерв:</i>\n'
             in_squad = '+' if not players_limit or n <= players_limit else '  '
             safe_name = _html_escape(name)
+            if (user_id, platform) in duty_accounts:
+                payment_mark = ' 🧹'
+            else:
+                payment_mark = ' 💰' if paid else ''
             platform_mark = f' [{_html_escape(platform)}]' if platform != 'telegram' else ' [telegram]'
-            text += f'{in_squad} {n}. {safe_name}{platform_mark}\n'
+            text += f'{in_squad} {n}. {safe_name}{payment_mark}{platform_mark}\n'
 
     # Cancelled applications with strikethrough
     canceled_players = db.get_event_revoked_users(chat_id) or []
@@ -498,6 +536,75 @@ def parse_datetime(str_datetime_in_free_form: str, translate: Callable[[str], st
         return None
     return found_date
 
+# Currency signs and ISO codes the bots recognise after an amount. Nothing is
+# ever converted — the sign is only a label, so each chat can use its own.
+CURRENCY_SIGNS = ('₽', '$', '€', '₸', '₴', '₾', '₺', '£', '¥', '₩', '₫', '₪',
+                  'zł', 'Kč', 'Ft', 'лв', 'сом', 'сум', 'руб', 'грн', 'тг')
+CURRENCY_WORDS = {
+    'рублей': '₽', 'рубля': '₽', 'рубль': '₽', 'руб.': '₽',
+    'тенге': '₸', 'гривен': '₴', 'гривны': '₴', 'гривна': '₴',
+    'долларов': '$', 'доллара': '$', 'евро': '€', 'манат': '₼',
+    'сомов': 'сом', 'сумов': 'сум', 'драм': '֏', 'лари': '₾',
+}
+
+
+def _split_currency(rest: str):
+    """Pull a currency label off the front of what follows the amount.
+
+    "5200 ₸ после зала" -> ('₸', 'после зала'); "5200 после зала" -> ('', ...).
+    Recognises signs, three-letter ISO codes and a few Russian words, so a
+    chat in any country can label its own kitty.
+    """
+    rest = (rest or '').strip()
+    if not rest:
+        return '', ''
+    head, _, tail = rest.partition(' ')
+    bare = head.strip().strip('.,')
+    if bare in CURRENCY_WORDS:
+        return CURRENCY_WORDS[bare], tail.strip()
+    if bare.lower() in CURRENCY_WORDS:
+        return CURRENCY_WORDS[bare.lower()], tail.strip()
+    if bare in CURRENCY_SIGNS:
+        return bare, tail.strip()
+    if len(bare) == 3 and bare.isalpha() and bare.isupper():
+        return bare, tail.strip()          # KZT, RUB, USD, ...
+    return '', rest
+
+
+def _parse_money(raw: str):
+    """Split "5200 ₸ после аренды" into (Decimal, currency, comment).
+
+    Accepts 5200, 5 200, 5200.50 and 5200,50; returns (None, '', '') when
+    there is no number to read.
+    """
+    text = (raw or '').strip()
+    m = re.match(r'^([-+]?[\d\s]+(?:[.,]\d{1,2})?)\s*(.*)$', text, re.S)
+    if not m:
+        return None, '', ''
+    number = m.group(1).replace(' ', '').replace('\u00a0', '').replace(',', '.')
+    try:
+        amount = decimal.Decimal(number)
+    except decimal.InvalidOperation:
+        return None, '', ''
+    currency, comment = _split_currency(m.group(2))
+    return amount, currency, comment
+
+
+def _format_money(amount, currency: str = '') -> str:
+    """5200 -> "5 200 ₸", using the chat's own currency label."""
+    sign = currency or BANK_CURRENCY
+    try:
+        value = decimal.Decimal(amount)
+    except Exception:
+        return f'{amount} {sign}'.strip()
+    quantised = value.quantize(decimal.Decimal('0.01'))
+    if quantised == quantised.to_integral_value():
+        body = f'{int(quantised):,}'.replace(',', '\u00a0')
+    else:
+        body = f'{quantised:,.2f}'.replace(',', '\u00a0')
+    return f'{body}\u00a0{sign}'.strip()
+
+
 @logger.catch
 def parse_cmd_arg(update, _context) -> str:
     user_input = update.message.text.strip()
@@ -669,8 +776,11 @@ def create_event_full_text(this_chat_id: int, translate: Callable[[str], str],
     if PAYMENTS_PAGE_URL:
         try:
             event_id = db.get_event_id_by_chat_id(this_chat_id)
-            payments_link = f'{PAYMENTS_PAGE_URL}?event={event_id}'
-            links.append(f'<a href="{payments_link}">{translate("Current payments")}</a>')
+            primary_event_id = db.get_primary_event_id(event_id)
+            payments_link = payments_page_link(primary_event_id, this_chat_id)
+            links.append(
+                f'<a href="{_html_escape(payments_link)}">{translate("Current payments")}</a>'
+            )
         except:
             pass
     elif telegraph_url:
@@ -714,14 +824,17 @@ def create_event_full_text(this_chat_id: int, translate: Callable[[str], str],
     # Show linked players from other platform
     if linked_players:
         start_n = len(players) + 1
-        for i, (user_id, platform, name) in enumerate(linked_players):
+        for i, (user_id, platform, name, paid) in enumerate(linked_players):
             n = start_n + i
             if players_limit and n == players_limit + 1:
                 text_players += '\t\t\n' + translate('Reserve') + ':\n'
             in_squad = '➕' if not players_limit or n <= players_limit else '      '
             platform_mark = f' [{_html_escape(platform)}]'
-            duty_emoji = ' 🧹' if (user_id, platform) in duty_accounts else ''
-            text_players += in_squad + f'{n}. {_wrap_closed(_html_escape(name) + platform_mark + duty_emoji)}\n'
+            if (user_id, platform) in duty_accounts:
+                status_emoji = ' 🧹'
+            else:
+                status_emoji = ' 💰' if paid else ''
+            text_players += in_squad + f'{n}. {_wrap_closed(_html_escape(name) + platform_mark + status_emoji)}\n'
 
     text += '\n' + text_players
     total_players = len(players) + len(linked_players)
@@ -1104,6 +1217,56 @@ async def copy_event_from_linked(update, context):
 
 @logger.catch
 @make_translatable_user_id_context
+async def show_or_set_bank(update, context):
+    """Show or set how much the community has in the kitty (/event_bank)."""
+    translate = context.user_data['translate']
+    this_chat_id = update.message.chat_id
+    user = update.message.from_user
+    new_chat_id_memoization(this_chat_id, user.language_code)
+
+    raw = parse_cmd_arg(update, context)
+    if not raw:
+        current = db.get_bank_amount(this_chat_id)
+        if not current:
+            await update.message.reply_text(
+                translate('The kitty is empty so far.') + '\n/event_bank 5200'
+            )
+            return
+        amount, updated_at, updated_by, comment, currency = current
+        who = db.get_duty_display_name(updated_by, db.PLATFORM) if updated_by else ''
+        when = _coerce_to_datetime(updated_at)
+        when_txt = when.strftime('%d.%m.%Y %H:%M') if when else str(updated_at)[:16]
+        text = f'💰 {translate("In the kitty")}: <b>{_format_money(amount, currency)}</b>'
+        if comment:
+            text += f'\n{_html_escape(comment)}'
+        text += f'\n<i>{translate("updated")} {when_txt}'
+        if who:
+            text += f', {_html_escape(who)}'
+        text += '</i>'
+        await update.message.reply_text(text, parse_mode=ParseMode.HTML)
+        return
+
+    amount, currency, comment = _parse_money(raw)
+    if amount is None:
+        await update.message.reply_text(
+            translate('Could not read that amount. For example: /event_bank 5200')
+        )
+        return
+    # Keep the label this chat already uses unless a new one was given
+    currency = currency or db.get_bank_currency(this_chat_id)
+
+    db.add_or_update_user(user.id, user.first_name, user.last_name, user.username)
+    if db.set_bank_amount(this_chat_id, amount, user.id, comment, currency):
+        text = f'💰 {translate("In the kitty")}: <b>{_format_money(amount, currency)}</b>'
+        if comment:
+            text += f'\n{_html_escape(comment)}'
+        await update.message.reply_text(text, parse_mode=ParseMode.HTML)
+    else:
+        await update.message.reply_text(translate('Could not store the amount, see the log.'))
+
+
+@logger.catch
+@make_translatable_user_id_context
 async def link_identity(update, context):
     """Link your MAX and Telegram accounts into one person (/iam).
 
@@ -1437,6 +1600,11 @@ Volunteer yourself for duty instead.
 /duty_stats
 Duty statistics: how many times each player has been on duty, and who never has.
 
+/event_bank [AMOUNT] [CURRENCY] [NOTE]
+Show what the community has in the kitty, or record a new amount. The currency
+belongs to this chat and is remembered: /event_bank 5200 ₸, /event_bank 5200 KZT.
+After that /event_bank 4800 keeps the same label.
+
 /iam [CODE]
 Link your accounts across messengers so duty history follows you, not the
 account. Without CODE - issues a code. With CODE - completes the link.
@@ -1543,6 +1711,7 @@ async def main():
     application.add_handler(CommandHandler('event_duty', assign_duty))
     application.add_handler(CommandHandler('mepls', volunteer_duty))
     application.add_handler(CommandHandler('duty_stats', show_duty_stats))
+    application.add_handler(CommandHandler('event_bank', show_or_set_bank))
     application.add_handler(CommandHandler('iam', link_identity))
     application.add_handler(CommandHandler('iam_forget', unlink_identity_cmd))
     application.add_handler(CallbackQueryHandler(button))

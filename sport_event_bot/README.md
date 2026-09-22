@@ -200,6 +200,40 @@ The duty player is marked 🧹 in the event announcement and gets a green
 Duty is shared across linked chats: a player picked in Telegram is shown in the
 linked MAX chat too, and the announcement is posted in both.
 
+### Community Kitty and the Payments Page
+
+`/event_bank` shows what the treasurer is holding, `/event_bank 5200` records a
+new amount, and `/event_bank 5200 after the rent` adds a note. The value is
+shared with the linked chat and every update is kept as history.
+
+**The currency belongs to the chat**, since teams in different countries may
+share one bot. Give it once with an amount and the chat keeps it:
+
+```
+/event_bank 120000 ₸      → 120 000 ₸
+/event_bank 5200 KZT      → ISO codes work too
+/event_bank 98000         → stays in ₸, no need to repeat the label
+```
+
+Nothing is ever converted between currencies — the label only says what the
+number means. `BANK_CURRENCY` in `.env` is just the fallback for a chat that
+has never named one (default `₽`).
+
+The payments page also shows that balance and a duty table for a period —
+4 weeks by default, switchable with the 2/4/8/12 links or `?weeks=`.
+
+Links to the page are signed automatically with a key that belongs to the chat
+(generated with the first link and kept in `Chats.page_secret`). When several
+teams share the bots, one group's link therefore cannot be edited into another
+group's event — the signature would have to come from a key they never see.
+Nothing to configure.
+
+This stops `?event=` from being guessed; it is not a password, so whoever holds
+the link itself can read that event. If a link reaches the wrong person, rotate
+the chat's key with `UPDATE Chats SET page_secret = NULL WHERE chat_id = ...;`
+— every earlier link for that chat stops working and the next command hands out
+a fresh one.
+
 ### Cross-Platform Chat Linking
 
 - `/link` - Link this Telegram chat with a MAX Messenger chat (generates a secret code to enter in the MAX bot)
@@ -208,7 +242,7 @@ linked MAX chat too, and the announcement is posted in both.
 
 ## 🗄️ Database Schema
 
-The bot uses MySQL with 12 tables:
+The bot uses MySQL with 13 tables:
 
 - **Users**: User profiles (id, first_name, last_name, username)
 - **Chats**: Chat/group information and latest bot message
@@ -220,6 +254,8 @@ The bot uses MySQL with 12 tables:
 - **ChatLinks**: Cross-platform (Telegram ↔ MAX) chat links
 - **EventLinks**: Cross-platform event links
 - **Duty**: Duty roster — who is on duty (and plays free) at each event
+- **Bank**: Treasurer's balance history (`/event_bank`)
+- **Chats.page_secret**: Per-chat key signing that chat's payments-page links
 - **UserLinks / UserLinkCodes**: Accounts of the same person across messengers
 
 ## 🌍 Supported Languages

@@ -103,6 +103,7 @@ def create_table_chats():
             latest_event_id BIGINT DEFAULT 0,
             latest_bot_message_id VARCHAR(64),
             latest_bot_message_text TEXT,
+            page_secret VARCHAR(64) DEFAULT NULL,
             extra1 TEXT,
             extra2 TEXT,
             extra3 TEXT,
@@ -877,8 +878,12 @@ def get_event_from_linked_chat(linked_chat_id: int, linked_platform: str) -> Opt
     return row if row else None
 
 
-def get_linked_event_users(event_id: int) -> List[Tuple[int, str, str]]:
-    """Get users from linked event. Returns [(user_id, platform, display_name), ...]."""
+def get_linked_event_users(event_id: int) -> List[Tuple[int, str, str, bool]]:
+    """Users of the linked event: [(user_id, platform, display_name, paid), ...].
+
+    The paid flag travels with them: without it each bot renders the other
+    platform's players as unpaid and their markers vanish on every redraw.
+    """
     linked_event_id = get_linked_event_id(event_id)
     if not linked_event_id:
         return []
@@ -886,7 +891,7 @@ def get_linked_event_users(event_id: int) -> List[Tuple[int, str, str]]:
     conn = reconnect()
     # Get participants with their platform info
     cur = _exec(conn, '''
-        SELECT p.user_id, e.platform, u.first_name, u.last_name, u.username
+        SELECT p.user_id, e.platform, u.first_name, u.last_name, u.username, p.paid
         FROM Participants p
         JOIN Events e ON p.event_id = e.event_id
         LEFT JOIN Users u ON p.user_id = u.user_id AND u.platform = e.platform
@@ -898,7 +903,7 @@ def get_linked_event_users(event_id: int) -> List[Tuple[int, str, str]]:
 
     result = []
     for row in rows:
-        user_id, platform, fnm, lnm, unm = row
+        user_id, platform, fnm, lnm, unm, paid = row
         fnm = fnm or ''
         lnm = lnm or ''
         unm = unm or ''
@@ -909,7 +914,7 @@ def get_linked_event_users(event_id: int) -> List[Tuple[int, str, str]]:
             name = unm
         elif not name:
             name = str(user_id)
-        result.append((user_id, platform, name))
+        result.append((user_id, platform, name, bool(paid)))
     return result
 
 # ==================== Cross-platform identity ====================
@@ -1185,7 +1190,7 @@ def get_duty_candidates(chat_id: int) -> List[Tuple[int, str, str]]:
         add(user_id, PLATFORM, compose_full_name(user_id))
     event_id = get_event_id_by_chat_id(chat_id)
     if event_id:
-        for user_id, platform, name in get_linked_event_users(event_id):
+        for user_id, platform, name, _paid in get_linked_event_users(event_id):
             add(user_id, platform, name)
     return candidates
 
@@ -1291,6 +1296,115 @@ def _column_type(conn, table: str, column: str) -> Optional[str]:
         return None
 
 
+def get_or_create_page_secret(chat_id: int) -> str:
+    """Per-chat key for signing payments-page links.
+
+    One key per chat, not one per installation: several groups share these
+    bots, and a link from one group must not open another group's event.
+    Generated on first use and kept in Chats.page_secret.
+    """
+    conn = reconnect()
+    try:
+        cur = _exec(conn, '''
+            SELECT page_secret FROM Chats WHERE chat_id = %s AND platform = %s LIMIT 1;
+        ''', (chat_id, PLATFORM))
+        row = cur.fetchone()
+        if row and row[0]:
+            return str(row[0])
+
+        import secrets as _secrets
+        secret = _secrets.token_hex(16)
+        _exec(conn, '''
+            INSERT INTO Chats (chat_id, platform, page_secret) VALUES (%s, %s, %s)
+            ON DUPLICATE KEY UPDATE page_secret = VALUES(page_secret);
+        ''', (chat_id, PLATFORM, secret))
+        conn.commit()
+        return secret
+    except Exception as e:
+        logger.error(f"Could not read or create the page secret for chat {chat_id}: {e}")
+        return ''
+    finally:
+        conn.close()
+
+
+# ==================== Community bank ====================
+
+
+def create_table_bank():
+    """Treasurer's running balance, one row per update so the history stays."""
+    conn = reconnect()
+    _exec(conn, '''
+        CREATE TABLE IF NOT EXISTS Bank (
+            bank_id BIGINT NOT NULL AUTO_INCREMENT,
+            chat_id BIGINT NOT NULL,
+            platform VARCHAR(16) NOT NULL DEFAULT 'max',
+            amount DECIMAL(12,2) NOT NULL,
+            currency VARCHAR(8) NOT NULL DEFAULT '',
+            comment VARCHAR(255) DEFAULT '',
+            updated_by BIGINT DEFAULT NULL,
+            updated_at DATETIME NOT NULL,
+            PRIMARY KEY (bank_id),
+            KEY idx_bank_chat (chat_id, platform)
+        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+    ''')
+    conn.commit()
+    conn.close()
+
+
+def set_bank_amount(chat_id: int, amount, user_id: int = None, comment: str = '',
+                    currency: str = '') -> bool:
+    """Record a new balance for this chat (and its linked chat).
+
+    The currency travels with the amount, so groups in different countries can
+    each label their own kitty. Nothing is ever converted between currencies.
+    """
+    conn = reconnect()
+    try:
+        _exec(conn, '''
+            INSERT INTO Bank (chat_id, platform, amount, currency, comment, updated_by, updated_at)
+            VALUES (%s, %s, %s, %s, %s, %s, %s)
+        ''', (chat_id, PLATFORM, amount, currency or '', comment or '', user_id,
+              datetime.datetime.now()))
+        conn.commit()
+        return True
+    except Exception as e:
+        logger.error(f"Could not store bank amount for chat {chat_id}: {e}")
+        return False
+    finally:
+        conn.close()
+
+
+def get_bank_amount(chat_id: int):
+    """Latest balance for this chat or its linked chat: (amount, updated_at,
+    updated_by, comment, currency), or None when nobody ever set one."""
+    chats = _duty_chat_scope(chat_id)
+    placeholders = ','.join(['%s'] * len(chats))
+    conn = reconnect()
+    cur = _exec(conn, f'''
+        SELECT amount, updated_at, updated_by, comment, currency FROM Bank
+        WHERE chat_id IN ({placeholders})
+        ORDER BY updated_at DESC, bank_id DESC LIMIT 1;
+    ''', tuple(chats))
+    row = cur.fetchone()
+    conn.close()
+    return row if row else None
+
+
+def get_bank_currency(chat_id: int) -> str:
+    """Currency this chat last recorded, or '' when it never has."""
+    chats = _duty_chat_scope(chat_id)
+    placeholders = ','.join(['%s'] * len(chats))
+    conn = reconnect()
+    cur = _exec(conn, f'''
+        SELECT currency FROM Bank
+        WHERE chat_id IN ({placeholders}) AND currency <> ''
+        ORDER BY updated_at DESC, bank_id DESC LIMIT 1;
+    ''', tuple(chats))
+    row = cur.fetchone()
+    conn.close()
+    return str(row[0]) if row and row[0] else ''
+
+
 # ==================== Schema migrations ====================
 # A fresh database gets the correct schema from the CREATE TABLE statements
 # above. Everything below only matters when upgrading a database created by an
@@ -1300,6 +1414,8 @@ def _column_type(conn, table: str, column: str) -> Optional[str]:
 def _migrate_add_columns(conn):
     """Columns that were added after the first release."""
     added_columns = [
+        ('Chats', 'page_secret', 'VARCHAR(64) DEFAULT NULL'),
+        ('Bank', 'currency', "VARCHAR(8) NOT NULL DEFAULT ''"),
         ('Participants', 'paid_at', 'DATETIME DEFAULT NULL'),
         ('Participants', 'invited_by', 'BIGINT DEFAULT NULL'),
         ('Events', 'payment_url', 'TEXT DEFAULT NULL'),
@@ -1405,6 +1521,7 @@ def init_database():
     create_table_event_links()
     create_table_duty()
     create_table_user_links()
+    create_table_bank()
     migrate_schema()
 
 def record_payment_log(chat_id: int, payer_user_id: int, for_friend: bool = False):
