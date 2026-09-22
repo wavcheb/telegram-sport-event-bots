@@ -200,6 +200,22 @@ The duty player is marked 🧹 in the event announcement and gets a green
 Duty is shared across linked chats: a player picked in Telegram is shown in the
 linked MAX chat too, and the announcement is posted in both.
 
+### Community Kitty and the Payments Page
+
+`/event_bank` shows what the treasurer is holding, `/event_bank 5200` records a
+new amount, and `/event_bank 5200 after the rent` adds a note. The value is
+shared with the linked chat and every update is kept as history. The currency
+sign comes from `BANK_CURRENCY` (default `₽`) — the bots never convert between
+currencies, so one sign is enough.
+
+The payments page also shows that balance and a duty table for a period —
+4 weeks by default, switchable with the 2/4/8/12 links or `?weeks=`.
+
+Links to the page can be signed: set the same `PAYMENTS_SECRET` in both bots'
+`.env` and in `web/config.php`, and the page stops opening for a guessed
+`?event=`. It stops enumeration, it is not a password: whoever holds a link can
+read that event.
+
 ### Cross-Platform Chat Linking
 
 - `/link` - Link this Telegram chat with a MAX Messenger chat (generates a secret code to enter in the MAX bot)
@@ -208,7 +224,7 @@ linked MAX chat too, and the announcement is posted in both.
 
 ## 🗄️ Database Schema
 
-The bot uses MySQL with 12 tables:
+The bot uses MySQL with 13 tables:
 
 - **Users**: User profiles (id, first_name, last_name, username)
 - **Chats**: Chat/group information and latest bot message
@@ -220,6 +236,7 @@ The bot uses MySQL with 12 tables:
 - **ChatLinks**: Cross-platform (Telegram ↔ MAX) chat links
 - **EventLinks**: Cross-platform event links
 - **Duty**: Duty roster — who is on duty (and plays free) at each event
+- **Bank**: Treasurer's balance history (`/event_bank`)
 - **UserLinks / UserLinkCodes**: Accounts of the same person across messengers
 
 ## 🌍 Supported Languages

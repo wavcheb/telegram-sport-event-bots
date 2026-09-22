@@ -1282,6 +1282,62 @@ def _primary_key_columns(conn, table: str) -> List[str]:
         return []
 
 
+# ==================== Community bank ====================
+
+
+def create_table_bank():
+    """Treasurer's running balance, one row per update so the history stays."""
+    conn = reconnect()
+    _exec(conn, '''
+        CREATE TABLE IF NOT EXISTS Bank (
+            bank_id BIGINT NOT NULL AUTO_INCREMENT,
+            chat_id BIGINT NOT NULL,
+            platform VARCHAR(16) NOT NULL DEFAULT 'telegram',
+            amount DECIMAL(12,2) NOT NULL,
+            comment VARCHAR(255) DEFAULT '',
+            updated_by BIGINT DEFAULT NULL,
+            updated_at DATETIME NOT NULL,
+            PRIMARY KEY (bank_id),
+            KEY idx_bank_chat (chat_id, platform)
+        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+    ''')
+    conn.commit()
+    conn.close()
+
+
+def set_bank_amount(chat_id: int, amount, user_id: int = None, comment: str = '') -> bool:
+    """Record a new balance for this chat (and its linked chat)."""
+    conn = reconnect()
+    try:
+        _exec(conn, '''
+            INSERT INTO Bank (chat_id, platform, amount, comment, updated_by, updated_at)
+            VALUES (%s, %s, %s, %s, %s, %s)
+        ''', (chat_id, PLATFORM, amount, comment or '', user_id, datetime.datetime.now()))
+        conn.commit()
+        return True
+    except Exception as e:
+        logger.error(f"Could not store bank amount for chat {chat_id}: {e}")
+        return False
+    finally:
+        conn.close()
+
+
+def get_bank_amount(chat_id: int):
+    """Latest balance for this chat or its linked chat: (amount, updated_at,
+    updated_by, comment), or None when the treasurer never set one."""
+    chats = _duty_chat_scope(chat_id)
+    placeholders = ','.join(['%s'] * len(chats))
+    conn = reconnect()
+    cur = _exec(conn, f'''
+        SELECT amount, updated_at, updated_by, comment FROM Bank
+        WHERE chat_id IN ({placeholders})
+        ORDER BY updated_at DESC, bank_id DESC LIMIT 1;
+    ''', tuple(chats))
+    row = cur.fetchone()
+    conn.close()
+    return row if row else None
+
+
 # ==================== Schema migrations ====================
 # A fresh database gets the correct schema from the CREATE TABLE statements
 # above. Everything below only matters when upgrading a database created by an
@@ -1392,6 +1448,7 @@ def init_database():
     create_table_event_links()
     create_table_duty()
     create_table_user_links()
+    create_table_bank()
     migrate_schema()
 
 def record_payment_log(chat_id: int, payer_user_id: int, for_friend: bool = False):

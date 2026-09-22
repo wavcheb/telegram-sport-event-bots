@@ -48,6 +48,17 @@ if (!$event_id) {
     die('Event not found. Use ?event=ID or ?chat=CHAT_ID');
 }
 
+// Signed links: with a shared secret configured, only links the bots produced
+// open, so the page cannot be walked by editing ?event=.
+if (defined('PAYMENTS_SECRET') && PAYMENTS_SECRET !== '') {
+    $expected = substr(hash_hmac('sha256', (string)$event_id, PAYMENTS_SECRET), 0, 16);
+    $given = isset($_GET['t']) ? (string)$_GET['t'] : '';
+    if (!hash_equals($expected, $given)) {
+        http_response_code(403);
+        die('Link is invalid or has expired. Ask the bot for a fresh one with /payments.');
+    }
+}
+
 // Get event info
 $stmt = $pdo->prepare('SELECT event_id, chat_id, description, datetime, status FROM Events WHERE event_id = ?');
 $stmt->execute([$event_id]);
@@ -106,6 +117,80 @@ try {
     }
 } catch (PDOException $e) {
     // Duty table may not exist yet on older deployments — just skip the badge
+}
+
+// Duty history over a configurable window (default 4 weeks)
+$duty_weeks = isset($_GET['weeks']) && is_numeric($_GET['weeks'])
+    ? max(1, min(104, (int)$_GET['weeks']))
+    : (defined('DUTY_WEEKS_DEFAULT') ? (int)DUTY_WEEKS_DEFAULT : 4);
+
+$duty_history = [];
+$chat_scope = [];
+try {
+    // The duty table is per chat; include the linked chat so both messengers
+    // show the same history.
+    $stmt = $pdo->prepare('SELECT chat_id, platform FROM Events WHERE event_id IN (' . $placeholders . ')');
+    $stmt->execute($all_event_ids);
+    while ($r = $stmt->fetch(PDO::FETCH_ASSOC)) {
+        if ($r['chat_id'] !== null) {
+            $chat_scope[] = (int)$r['chat_id'];
+        }
+    }
+    if ($chat_scope) {
+        $chat_ph = implode(',', array_fill(0, count($chat_scope), '?'));
+        $stmt = $pdo->prepare("
+            SELECT d.user_id, d.platform, d.duty_date, u.first_name, u.last_name, u.username
+            FROM Duty d
+            LEFT JOIN Users u ON d.user_id = u.user_id AND u.platform = d.platform
+            WHERE d.chat_id IN ($chat_ph)
+              AND d.duty_date >= DATE_SUB(NOW(), INTERVAL ? WEEK)
+            ORDER BY d.duty_date DESC
+        ");
+        $stmt->execute(array_merge($chat_scope, [$duty_weeks]));
+        $duty_history = $stmt->fetchAll(PDO::FETCH_ASSOC);
+    }
+} catch (PDOException $e) {
+    // Duty table may not exist yet on older deployments
+}
+
+// Duty tally per person over that window
+$duty_tally = [];
+foreach ($duty_history as $d) {
+    $name = formatName($d, true);
+    if (!isset($duty_tally[$name])) {
+        $duty_tally[$name] = ['count' => 0, 'last' => $d['duty_date']];
+    }
+    $duty_tally[$name]['count']++;
+    if ($d['duty_date'] > $duty_tally[$name]['last']) {
+        $duty_tally[$name]['last'] = $d['duty_date'];
+    }
+}
+uasort($duty_tally, fn($a, $b) => $b['count'] <=> $a['count']);
+
+// What the treasurer last recorded
+$bank = null;
+try {
+    if ($chat_scope) {
+        $chat_ph = implode(',', array_fill(0, count($chat_scope), '?'));
+        $stmt = $pdo->prepare("
+            SELECT amount, comment, updated_at FROM Bank
+            WHERE chat_id IN ($chat_ph)
+            ORDER BY updated_at DESC, bank_id DESC LIMIT 1
+        ");
+        $stmt->execute($chat_scope);
+        $bank = $stmt->fetch(PDO::FETCH_ASSOC) ?: null;
+    }
+} catch (PDOException $e) {
+    // Bank table may not exist yet on older deployments
+}
+
+function formatMoney($amount) {
+    $sign = defined('BANK_CURRENCY') ? BANK_CURRENCY : '';
+    $value = (float)$amount;
+    $body = (abs($value - round($value)) < 0.005)
+        ? number_format($value, 0, ',', ' ')
+        : number_format($value, 2, ',', ' ');
+    return trim($body . ' ' . $sign);
 }
 
 function isOnDuty($row, $duty_keys) {
@@ -238,6 +323,46 @@ $unpaid_count = $total_participants - $paid_count;
             text-align: center;
             color: #888;
         }
+
+        .bank {
+            background: #fff8e1;
+            border: 1px solid #ffe082;
+            border-radius: 8px;
+            padding: 12px 15px;
+            margin-bottom: 20px;
+        }
+        .bank-amount { font-size: 1.3em; font-weight: bold; color: #7a5c00; }
+        .bank-note { color: #8d7b4a; font-size: 0.9em; margin-top: 4px; }
+
+        table.duty {
+            width: 100%;
+            border-collapse: collapse;
+            background: #fff;
+            border-radius: 8px;
+            overflow: hidden;
+            box-shadow: 0 1px 3px rgba(0,0,0,0.1);
+        }
+        table.duty th, table.duty td {
+            padding: 10px 12px;
+            text-align: left;
+            border-bottom: 1px solid #eee;
+            font-size: 0.95em;
+        }
+        table.duty th { background: #f1f3f5; font-weight: 600; color: #555; }
+        table.duty td.num { text-align: right; width: 4em; }
+        table.duty tr:last-child td { border-bottom: none; }
+
+        .period { margin: 8px 0 12px; font-size: 0.9em; color: #666; }
+        .period a {
+            display: inline-block;
+            padding: 3px 9px;
+            margin-right: 5px;
+            border-radius: 12px;
+            background: #e9ecef;
+            color: #495057;
+            text-decoration: none;
+        }
+        .period a.active { background: #007bff; color: #fff; }
     </style>
 </head>
 <body>
@@ -249,6 +374,17 @@ $unpaid_count = $total_participants - $paid_count;
         <?php endif; ?>
         <div><strong>Статус:</strong> <?= $event['status'] === 'Open' ? 'Открыто' : 'Закрыто' ?></div>
     </div>
+
+    <?php if ($bank): ?>
+        <div class="bank">
+            <div>Касса сообщества</div>
+            <div class="bank-amount"><?= htmlspecialchars(formatMoney($bank['amount'])) ?></div>
+            <?php if (!empty($bank['comment'])): ?>
+                <div class="bank-note"><?= htmlspecialchars($bank['comment']) ?></div>
+            <?php endif; ?>
+            <div class="bank-note">обновлено <?= date('d.m.Y H:i', strtotime($bank['updated_at'])) ?></div>
+        </div>
+    <?php endif; ?>
 
     <div class="stats">
         <div class="stat-box paid">
@@ -314,6 +450,35 @@ $unpaid_count = $total_participants - $paid_count;
         </div>
     </div>
     <?php endif; ?>
+
+    <div class="section">
+        <h2>🧹 Дежурства</h2>
+        <?php
+            $link_base = 'payments.php?event=' . (int)$event_id
+                . (isset($_GET['t']) ? '&t=' . urlencode((string)$_GET['t']) : '');
+        ?>
+        <div class="period">
+            Период:
+            <?php foreach ([2, 4, 8, 12] as $w): ?>
+                <a class="<?= $w === $duty_weeks ? 'active' : '' ?>"
+                   href="<?= htmlspecialchars($link_base . '&weeks=' . $w) ?>"><?= $w ?> нед.</a>
+            <?php endforeach; ?>
+        </div>
+        <?php if (empty($duty_tally)): ?>
+            <div class="list"><div class="empty">За этот период дежурств не было</div></div>
+        <?php else: ?>
+            <table class="duty">
+                <tr><th>Игрок</th><th class="num">Дежурств</th><th>Последнее</th></tr>
+                <?php foreach ($duty_tally as $name => $info): ?>
+                    <tr>
+                        <td><?= htmlspecialchars($name) ?></td>
+                        <td class="num"><?= (int)$info['count'] ?></td>
+                        <td><?= date('d.m.Y', strtotime($info['last'])) ?></td>
+                    </tr>
+                <?php endforeach; ?>
+            </table>
+        <?php endif; ?>
+    </div>
 
     <div class="updated">
         Обновлено: <?= date('Y-m-d H:i:s') ?>

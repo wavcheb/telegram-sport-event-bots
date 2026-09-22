@@ -14,6 +14,9 @@ import datetime
 import re
 import asyncio
 import json
+import hmac
+import hashlib
+import decimal
 import urllib.request
 import urllib.parse
 import urllib.error
@@ -64,6 +67,7 @@ BOT_COMMANDS = [
     ('event_duty', 'Выбрать дежурного на событие'),
     ('mepls', 'Вызваться дежурить самому'),
     ('duty_stats', 'Статистика дежурств'),
+    ('event_bank', 'Показать или записать сумму в кассе'),
     ('iam', 'Связать свои аккаунты MAX и Telegram'),
     ('iam_forget', 'Разорвать связь своих аккаунтов'),
     ('fix', 'Зафиксировать состав и статистику'),
@@ -110,6 +114,28 @@ BOT_DIR = os.path.dirname(os.path.abspath(__file__))
 
 # Payments page URL from environment
 PAYMENTS_PAGE_URL = os.getenv('PAYMENTS_PAGE_URL', '').strip()
+
+# Signing key shared with the payments page (config.php). When set, event
+# links carry an HMAC so the page cannot be browsed by guessing event ids.
+PAYMENTS_SECRET = os.getenv('PAYMENTS_SECRET', '').strip()
+
+# Shown next to the kitty balance. A single sign is enough — the bots
+# never convert between currencies.
+BANK_CURRENCY = os.getenv('BANK_CURRENCY', '₽').strip()
+
+
+def payments_page_link(event_id: int) -> str:
+    """Link to the payments page for an event, signed when a secret is set."""
+    if not PAYMENTS_PAGE_URL:
+        return ''
+    link = f'{PAYMENTS_PAGE_URL}?event={event_id}'
+    if PAYMENTS_SECRET:
+        token = hmac.new(
+            PAYMENTS_SECRET.encode('utf-8'), str(event_id).encode('utf-8'), hashlib.sha256
+        ).hexdigest()[:16]
+        link += f'&t={token}'
+    return link
+
 
 # Telegram bot token for cross-platform sync
 TG_BOT_TOKEN = os.getenv('TG_BOT_TOKEN', '').strip()
@@ -307,7 +333,7 @@ def create_telegram_message_text(chat_id: int, payment_url: str = None) -> str:
         try:
             event_id = db.get_event_id_by_chat_id(chat_id)
             primary_event_id = db.get_primary_event_id(event_id)
-            payments_link = f'{PAYMENTS_PAGE_URL}?event={primary_event_id}'
+            payments_link = payments_page_link(primary_event_id)
             links.append(f'<a href="{_escape_html(payments_link)}">📊 Текущие платежи</a>')
         except:
             pass
@@ -458,7 +484,7 @@ def create_event_full_text(this_chat_id: int, payment_url: str = None, closed: s
             event_id = db.get_event_id_by_chat_id(this_chat_id)
             # Use primary (original) event_id for linked events
             primary_event_id = db.get_primary_event_id(event_id)
-            payments_link = f'{PAYMENTS_PAGE_URL}?event={primary_event_id}'
+            payments_link = payments_page_link(primary_event_id)
             links.append(f'<a href="{_escape_html(payments_link)}">📊 Текущие платежи</a>')
         except:
             pass
@@ -538,6 +564,34 @@ def create_event_full_text(this_chat_id: int, payment_url: str = None, closed: s
         text += f'\n🧹 Дежурный: <b>{duty_name}</b> — за игру не платит\n'
     safe = text.strip()
     return safe if safe else " "
+
+
+def _parse_money(raw: str):
+    """Split "5200 после аренды" into (Decimal, comment). Accepts 5200,
+    5 200, 5200.50 and 5200,50; returns (None, '') when there is no number."""
+    text = (raw or '').strip()
+    m = re.match(r'^([-+]?[\d\s]+(?:[.,]\d{1,2})?)\s*(.*)$', text, re.S)
+    if not m:
+        return None, ''
+    number = m.group(1).replace(' ', '').replace('\u00a0', '').replace(',', '.')
+    try:
+        return decimal.Decimal(number), m.group(2).strip()
+    except decimal.InvalidOperation:
+        return None, ''
+
+
+def _format_money(amount) -> str:
+    """5200 -> "5 200 ₽" (the sign comes from BANK_CURRENCY)."""
+    try:
+        value = decimal.Decimal(amount)
+    except Exception:
+        return f'{amount} {BANK_CURRENCY}'.strip()
+    quantised = value.quantize(decimal.Decimal('0.01'))
+    if quantised == quantised.to_integral_value():
+        body = f'{int(quantised):,}'.replace(',', '\u00a0')
+    else:
+        body = f'{quantised:,.2f}'.replace(',', '\u00a0')
+    return f'{body}\u00a0{BANK_CURRENCY}'.strip()
 
 
 def parse_cmd_arg(text: str) -> str:
@@ -643,6 +697,10 @@ async def cmd_help(event: MessageCreated):
 
 /duty_stats
 Статистика дежурств: кто сколько раз дежурил и кто ещё ни разу
+
+/event_bank [СУММА]
+Показать сумму в кассе. С суммой - записать новую,
+например: /event_bank 5200 или /event_bank 5200 после аренды
 
 /iam [КОД]
 Связать свои аккаунты в MAX и Telegram, чтобы история дежурств считалась
@@ -1347,6 +1405,57 @@ async def cmd_mepls(event: MessageCreated):
     name = db.compose_full_name(user.user_id)
     logger.info(f"Duty volunteered: {user.user_id} in chat {chat_id}")
     await _announce_duty(event, user.user_id, db.PLATFORM, name, volunteered=True)
+
+
+@dp.message_created(Command('event_bank'))
+async def cmd_event_bank(event: MessageCreated):
+    """Show or set how much the community has in the kitty."""
+    chat_id = event.chat.chat_id
+    user = event.message.sender
+    new_chat_id_memoization(chat_id)
+
+    raw = parse_cmd_arg(event.message.body.text or '')
+    if not raw:
+        current = db.get_bank_amount(chat_id)
+        if not current:
+            await event.message.answer(
+                'В кассе пока ничего не записано.\n'
+                'Записать: /event_bank 5200'
+            )
+            return
+        amount, updated_at, updated_by, comment = current
+        who = db.get_duty_display_name(updated_by, db.PLATFORM) if updated_by else ''
+        when = _coerce_to_datetime(updated_at)
+        when_txt = when.strftime('%d.%m.%Y %H:%M') if when else str(updated_at)[:16]
+        text = f'💰 В кассе: <b>{_format_money(amount)}</b>'
+        if comment:
+            text += f'\n{_escape_html(comment)}'
+        text += f'\n<i>обновлено {when_txt}'
+        if who:
+            text += f', {_escape_html(who)}'
+        text += '</i>'
+        await event.bot.send_message(
+            chat_id=chat_id, text=text, format=ParseMode.HTML, disable_link_preview=True
+        )
+        return
+
+    amount, comment = _parse_money(raw)
+    if amount is None:
+        await event.message.answer(
+            'Не понял сумму. Например: /event_bank 5200 или /event_bank 5200 после аренды'
+        )
+        return
+
+    db.add_or_update_user(user.user_id, user.first_name or '', user.last_name or '', user.username or '')
+    if db.set_bank_amount(chat_id, amount, user.user_id, comment):
+        text = f'💰 В кассе: <b>{_format_money(amount)}</b>'
+        if comment:
+            text += f'\n{_escape_html(comment)}'
+        await event.bot.send_message(
+            chat_id=chat_id, text=text, format=ParseMode.HTML, disable_link_preview=True
+        )
+    else:
+        await event.message.answer('Не удалось записать сумму, подробности в логе.')
 
 
 @dp.message_created(Command('iam'))
