@@ -87,14 +87,22 @@ async def register_bot_commands(bot_instance) -> None:
         await bot_instance.set_commands(*commands)
         logger.info(f"Registered {len(commands)} bot commands in MAX")
     except AttributeError:
-        # maxapi < 1.2.2 only has the deprecated PATCH /me variant
+        # maxapi < 1.2.2 only has the deprecated PATCH /me variant. It still
+        # works, but MAX is retiring it — upgrade rather than rely on it.
+        logger.warning(
+            "This maxapi has no set_commands(); falling back to the deprecated "
+            "set_my_commands(). Upgrade with: pip install -U 'maxapi>=1.2.2'"
+        )
         try:
             await bot_instance.set_my_commands(*commands)
             logger.info(f"Registered {len(commands)} bot commands in MAX (legacy API)")
         except Exception as e:
             logger.warning(f"Could not register bot commands: {e}")
     except Exception as e:
-        logger.warning(f"Could not register bot commands: {e}")
+        logger.warning(
+            f"Could not register bot commands: {e}. Command hints will be missing, "
+            f"but the bot itself works."
+        )
 
 
 def _escape_html(s: str) -> str:

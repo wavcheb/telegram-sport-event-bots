@@ -45,7 +45,7 @@ from telegram.ext import Application, CommandHandler, MessageHandler, CallbackQu
 from telegram import InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.constants import ParseMode
 from recurrent.event_parser import RecurringEvent
-from telegram.error import BadRequest
+from telegram.error import BadRequest, NetworkError, TimedOut
 
 # Bot directory paths
 BOT_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -1651,6 +1651,22 @@ async def shutdown(application, loop):
     await asyncio.gather(*tasks, return_exceptions=True)
     loop.stop()
 
+async def on_error(update, context):
+    """Report network hiccups as one line instead of a wall of stack trace.
+
+    A timeout while answering a button is not a bug in the bot and should not
+    read like one; everything else is still reported in full.
+    """
+    err = context.error
+    # BadRequest subclasses NetworkError in python-telegram-bot, so it has to be
+    # excluded explicitly — "message is not modified" and friends are our bugs,
+    # not the network's.
+    if isinstance(err, (NetworkError, TimedOut)) and not isinstance(err, BadRequest):
+        logger.warning(f"Telegram is temporarily unreachable: {type(err).__name__}: {err}")
+        return
+    logger.opt(exception=err).error("Unhandled error while processing an update")
+
+
 async def main():
     logger.remove()
     logger.add(os.path.join(BOT_DIR, "logs", "logs.log"), level="INFO")
@@ -1676,8 +1692,17 @@ async def main():
     proxy_url = os.getenv('TELEGRAM_PROXY')
     tg_api_url = _normalize_tg_api_url(os.getenv('TG_API_URL', ''))
     builder = Application.builder().token(api_token)
+    # The default 5s connect timeout is tight when a proxy or a Worker sits in
+    # front of the API; a slow hop should not look like an outage.
+    builder = (builder
+               .connect_timeout(20.0)
+               .read_timeout(30.0)
+               .write_timeout(30.0)
+               .pool_timeout(10.0))
+    api_target = 'api.telegram.org'
     if tg_api_url:
         base = tg_api_url
+        api_target = base
         builder = builder.base_url(f'{base}/bot').base_file_url(f'{base}/file/bot')
         logger.info(f"Using Telegram API proxy: {base}")
     elif proxy_url:
@@ -1715,13 +1740,23 @@ async def main():
     application.add_handler(CommandHandler('iam', link_identity))
     application.add_handler(CommandHandler('iam_forget', unlink_identity_cmd))
     application.add_handler(CallbackQueryHandler(button))
+    application.add_error_handler(on_error)
     application.add_handler(MessageHandler(filters.TEXT | filters.StatusUpdate.NEW_CHAT_MEMBERS, unknown_command_handler))
 
     logger.info("Telegram Futsal Bot is starting...")
-    await application.initialize()
-    await application.start()
-
-    await application.updater.start_polling()
+    try:
+        await application.initialize()
+        await application.start()
+        await application.updater.start_polling()
+    except (NetworkError, TimedOut) as e:
+        host = api_target.replace('https://', '').replace('http://', '')
+        logger.error(
+            f"Cannot reach the Telegram API via {api_target}: {type(e).__name__}: {e}. "
+            f"Check that this server can actually reach it "
+            f"(curl -sS -m 10 https://{host}/bot<TOKEN>/getMe). "
+            f"Removing TG_API_URL from .env falls back to api.telegram.org."
+        )
+        raise SystemExit(1)
 
     logger.info("Bot is running...")
 
