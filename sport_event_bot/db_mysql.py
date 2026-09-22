@@ -1095,10 +1095,19 @@ def create_table_duty():
     conn.close()
 
 
+def _open_event_id(chat_id: int) -> Optional[int]:
+    """Open event of this chat, or None. A chat with no event is an ordinary
+    state, not an error, so duty lookups must not raise on it."""
+    try:
+        return get_event_id_by_chat_id(chat_id)
+    except Exception:
+        return None
+
+
 def _duty_event_key(chat_id: int) -> Optional[int]:
     """Duty is keyed by the primary event id, so two linked events
     (Telegram + MAX) share one duty instead of picking one each."""
-    event_id = get_event_id_by_chat_id(chat_id)
+    event_id = _open_event_id(chat_id)
     return get_primary_event_id(event_id) if event_id else None
 
 
@@ -1189,7 +1198,7 @@ def get_duty_candidates(chat_id: int) -> List[Tuple[int, str, str]]:
     # in the chat where the command was typed.
     for user_id in get_event_users(chat_id):
         add(user_id, PLATFORM, compose_full_name(user_id))
-    event_id = get_event_id_by_chat_id(chat_id)
+    event_id = _open_event_id(chat_id)
     if event_id:
         for user_id, platform, name, _paid in get_linked_event_users(event_id):
             add(user_id, platform, name)
@@ -1267,6 +1276,20 @@ def get_duty_stats(chat_id: int) -> List[Tuple[int, str, str, int]]:
     ]
     result.sort(key=lambda r: r[3], reverse=True)
     return result
+
+
+def _column_type(conn, table: str, column: str) -> Optional[str]:
+    """Actual SQL type of a column, or None when it does not exist."""
+    try:
+        cur = _exec(conn, '''
+            SELECT COLUMN_TYPE FROM information_schema.COLUMNS
+            WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = %s AND COLUMN_NAME = %s
+        ''', (table, column))
+        row = cur.fetchone()
+        return row[0] if row else None
+    except Exception as e:
+        logger.warning(f"Could not read type of {table}.{column}: {e}")
+        return None
 
 
 def _primary_key_columns(conn, table: str) -> List[str]:
