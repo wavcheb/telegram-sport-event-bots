@@ -15,7 +15,7 @@ Telegram bot for organizing sports events (any game such as football, volleyball
 - **Multi-language Support**: Russian, Ukrainian, Portuguese, Arabic, and English
 - **Interactive Buttons**: Inline keyboard for quick actions
 - **Cross-Platform MAX Sync**: Link chats with MAX Sport Event Bot (`/link`, `/unlink`); set `MAX_BOT_TOKEN` in `.env` for real-time updates of linked MAX chat messages
-- **Blocked Regions Support**: Access Telegram API via a Cloudflare Worker proxy (`TG_API_URL`) or a SOCKS/HTTP proxy (`TELEGRAM_PROXY`)
+- **Blocked Regions Support**: Access Telegram API via a Cloudflare Worker proxy (`TG_API_URL`) or a SOCKS/HTTP proxy (`TELEGRAM_PROXY`); set `TELEGRAM_FORCE_IPV4=1` when the proxy host resolves to IPv6 only and this server has no IPv6
 
 ## 📋 Requirements
 

@@ -5,7 +5,9 @@ parsedatetime>=2.6
 recurrent>=0.4.1
 
 # MAX Bot API - official library
-maxapi>=1.2.0
+# 1.2.2 has set_commands(); older versions only have the deprecated
+# change_info()/set_my_commands() path, which MAX is retiring.
+maxapi>=1.2.2
 
 # Database
 mysql-connector-python>=8.0.33

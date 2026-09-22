@@ -15,6 +15,7 @@ import os
 import datetime
 import re
 import signal
+import socket
 import gettext
 import json
 import hmac
@@ -45,7 +46,7 @@ from telegram.ext import Application, CommandHandler, MessageHandler, CallbackQu
 from telegram import InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.constants import ParseMode
 from recurrent.event_parser import RecurringEvent
-from telegram.error import BadRequest
+from telegram.error import BadRequest, NetworkError, TimedOut
 
 # Bot directory paths
 BOT_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -1651,6 +1652,56 @@ async def shutdown(application, loop):
     await asyncio.gather(*tasks, return_exceptions=True)
     loop.stop()
 
+def _ipv6_advertised_but_dead(host: str, port: int = 443, timeout: float = 3.0) -> bool:
+    """True when the host offers IPv6 but a connection over it does not work.
+
+    That combination is what hangs a client: the resolver hands back an AAAA
+    record, the client prefers it, and the packets go nowhere.
+    """
+    try:
+        infos = socket.getaddrinfo(host, port, socket.AF_INET6, socket.SOCK_STREAM)
+    except socket.gaierror:
+        return False          # no IPv6 offered at all — nothing to avoid
+    if not infos:
+        return False
+    for info in infos[:2]:
+        # Creating the socket can fail outright on a host built without IPv6
+        # ("Address family not supported"), which counts as unreachable.
+        try:
+            sock = socket.socket(socket.AF_INET6, socket.SOCK_STREAM)
+        except OSError:
+            break
+        sock.settimeout(timeout)
+        try:
+            sock.connect(info[4])
+            return False      # IPv6 works, leave the client alone
+        except OSError:
+            continue
+        finally:
+            sock.close()
+    # IPv6 is advertised and none of it answers — only worth avoiding if v4 works
+    try:
+        return bool(socket.getaddrinfo(host, port, socket.AF_INET, socket.SOCK_STREAM))
+    except socket.gaierror:
+        return False
+
+
+async def on_error(update, context):
+    """Report network hiccups as one line instead of a wall of stack trace.
+
+    A timeout while answering a button is not a bug in the bot and should not
+    read like one; everything else is still reported in full.
+    """
+    err = context.error
+    # BadRequest subclasses NetworkError in python-telegram-bot, so it has to be
+    # excluded explicitly — "message is not modified" and friends are our bugs,
+    # not the network's.
+    if isinstance(err, (NetworkError, TimedOut)) and not isinstance(err, BadRequest):
+        logger.warning(f"Telegram is temporarily unreachable: {type(err).__name__}: {err}")
+        return
+    logger.opt(exception=err).error("Unhandled error while processing an update")
+
+
 async def main():
     logger.remove()
     logger.add(os.path.join(BOT_DIR, "logs", "logs.log"), level="INFO")
@@ -1676,13 +1727,61 @@ async def main():
     proxy_url = os.getenv('TELEGRAM_PROXY')
     tg_api_url = _normalize_tg_api_url(os.getenv('TG_API_URL', ''))
     builder = Application.builder().token(api_token)
+
+    # A host may publish IPv6 that this server cannot actually reach; the client
+    # then picks v6 and hangs until the connect timeout. Decide once, at start.
+    force_ipv4_env = os.getenv('TELEGRAM_FORCE_IPV4', '').strip().lower()
+    if force_ipv4_env in ('1', 'true', 'yes'):
+        force_ipv4 = True
+    elif force_ipv4_env in ('0', 'false', 'no'):
+        force_ipv4 = False
+    else:
+        api_host = (tg_api_url or 'https://api.telegram.org').split('://', 1)[-1].split('/')[0]
+        force_ipv4 = _ipv6_advertised_but_dead(api_host)
+        if force_ipv4:
+            logger.warning(
+                f"{api_host} publishes IPv6 this server cannot reach; using IPv4. "
+                f"Set TELEGRAM_FORCE_IPV4=0 to disable this check."
+            )
+
+    # The default 5s connect timeout is tight when a proxy or a Worker sits in
+    # front of the API. These go either on the builder or inside the request
+    # object — python-telegram-bot rejects both at once.
+    if force_ipv4:
+        import httpx
+        from telegram.request import HTTPXRequest
+
+        def _ipv4_request():
+            transport_kwargs = {'local_address': '0.0.0.0'}
+            if proxy_url:
+                transport_kwargs['proxy'] = proxy_url
+            return HTTPXRequest(
+                connect_timeout=20.0, read_timeout=30.0,
+                write_timeout=30.0, pool_timeout=10.0,
+                httpx_kwargs={'transport': httpx.AsyncHTTPTransport(**transport_kwargs)},
+            )
+
+        builder = builder.request(_ipv4_request()).get_updates_request(_ipv4_request())
+        logger.info("Forcing IPv4 for Telegram API connections")
+    else:
+        builder = (builder
+                   .connect_timeout(20.0)
+                   .read_timeout(30.0)
+                   .write_timeout(30.0)
+                   .pool_timeout(10.0))
+
+    api_target = 'api.telegram.org'
     if tg_api_url:
         base = tg_api_url
+        api_target = base
         builder = builder.base_url(f'{base}/bot').base_file_url(f'{base}/file/bot')
         logger.info(f"Using Telegram API proxy: {base}")
     elif proxy_url:
         logger.info(f"Using proxy: {proxy_url.split('@')[-1] if '@' in proxy_url else proxy_url}")
-        builder = builder.proxy(proxy_url).get_updates_proxy(proxy_url)
+        # A custom request object already carries the proxy; setting it again
+        # on the builder is the same "two ways to say it" conflict.
+        if not force_ipv4:
+            builder = builder.proxy(proxy_url).get_updates_proxy(proxy_url)
     application = builder.build()
 
     # Initialize database tables and run migrations
@@ -1715,13 +1814,23 @@ async def main():
     application.add_handler(CommandHandler('iam', link_identity))
     application.add_handler(CommandHandler('iam_forget', unlink_identity_cmd))
     application.add_handler(CallbackQueryHandler(button))
+    application.add_error_handler(on_error)
     application.add_handler(MessageHandler(filters.TEXT | filters.StatusUpdate.NEW_CHAT_MEMBERS, unknown_command_handler))
 
     logger.info("Telegram Futsal Bot is starting...")
-    await application.initialize()
-    await application.start()
-
-    await application.updater.start_polling()
+    try:
+        await application.initialize()
+        await application.start()
+        await application.updater.start_polling()
+    except (NetworkError, TimedOut) as e:
+        host = api_target.replace('https://', '').replace('http://', '')
+        logger.error(
+            f"Cannot reach the Telegram API via {api_target}: {type(e).__name__}: {e}. "
+            f"Check that this server can actually reach it "
+            f"(curl -sS -m 10 https://{host}/bot<TOKEN>/getMe). "
+            f"Removing TG_API_URL from .env falls back to api.telegram.org."
+        )
+        raise SystemExit(1)
 
     logger.info("Bot is running...")
 

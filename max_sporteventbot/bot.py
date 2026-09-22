@@ -87,14 +87,22 @@ async def register_bot_commands(bot_instance) -> None:
         await bot_instance.set_commands(*commands)
         logger.info(f"Registered {len(commands)} bot commands in MAX")
     except AttributeError:
-        # maxapi < 1.2.2 only has the deprecated PATCH /me variant
+        # maxapi < 1.2.2 only has the deprecated PATCH /me variant. It still
+        # works, but MAX is retiring it — upgrade rather than rely on it.
+        logger.warning(
+            "This maxapi has no set_commands(); falling back to the deprecated "
+            "set_my_commands(). Upgrade with: pip install -U 'maxapi>=1.2.2'"
+        )
         try:
             await bot_instance.set_my_commands(*commands)
             logger.info(f"Registered {len(commands)} bot commands in MAX (legacy API)")
         except Exception as e:
             logger.warning(f"Could not register bot commands: {e}")
     except Exception as e:
-        logger.warning(f"Could not register bot commands: {e}")
+        logger.warning(
+            f"Could not register bot commands: {e}. Command hints will be missing, "
+            f"but the bot itself works."
+        )
 
 
 def _escape_html(s: str) -> str:
@@ -114,6 +122,10 @@ BOT_DIR = os.path.dirname(os.path.abspath(__file__))
 
 # Payments page URL from environment
 PAYMENTS_PAGE_URL = os.getenv('PAYMENTS_PAGE_URL', '').strip()
+
+# Trace every incoming message. Off by default — it is noisy and puts the
+# chat's conversations in the log.
+LOG_ALL_MESSAGES = os.getenv('MAX_LOG_MESSAGES', '').strip().lower() in ('1', 'true', 'yes')
 
 # Fallback label for the kitty when a chat has not used one yet. Each chat
 # keeps its own currency, recorded with the amount — see /event_bank.
@@ -526,7 +538,7 @@ def create_event_full_text(this_chat_id: int, payment_url: str = None, closed: s
         if (user_id, db.PLATFORM) in duty_accounts:
             payment_mark = ' 🧹 [дежурный]'
         else:
-            payment_mark = ' [оплачено]' if paid else ''
+            payment_mark = ' 💰' if paid else ''
         name_line = player_name_with_cards(games_registered, penalties, printable_name)
         text_players += f'{in_squad} {n}. {_wrap_closed(name_line + payment_mark)}\n'
 
@@ -543,7 +555,7 @@ def create_event_full_text(this_chat_id: int, payment_url: str = None, closed: s
             if (user_id, platform) in duty_accounts:
                 status_mark = ' 🧹 [дежурный]'
             else:
-                status_mark = ' [оплачено]' if paid else ''
+                status_mark = ' 💰' if paid else ''
             text_players += f'{in_squad} {n}. {_wrap_closed(safe_name + platform_mark + status_mark)}\n'
 
     text += text_players
@@ -1738,14 +1750,21 @@ async def handle_callback(event: MessageCallback):
 
 @dp.message_created()
 async def log_all_messages(event: MessageCreated):
-    """Log all incoming messages for debugging (catch-all fallback)."""
+    """Catch-all for messages that matched no command.
+
+    Silent by default: this used to log every message at INFO, which filled the
+    log and copied people's conversations into it. Set MAX_LOG_MESSAGES=1 to
+    turn the tracing back on while debugging something.
+    """
+    if not LOG_ALL_MESSAGES:
+        return
     chat = event.chat
     msg = event.message
     text = msg.body.text if msg and msg.body else ''
     sender = msg.sender if msg else None
     sender_name = f"{sender.first_name or ''} {sender.last_name or ''}".strip() if sender else 'unknown'
     chat_type = getattr(chat, 'type', 'unknown')
-    logger.info(f"[DEBUG] Message: chat_id={chat.chat_id}, type={chat_type}, from={sender_name}, text={text[:100]}")
+    logger.debug(f"Message: chat_id={chat.chat_id}, type={chat_type}, from={sender_name}, text={text[:100]}")
 
 
 async def main():
