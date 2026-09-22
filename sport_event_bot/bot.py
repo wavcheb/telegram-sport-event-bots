@@ -1727,13 +1727,7 @@ async def main():
     proxy_url = os.getenv('TELEGRAM_PROXY')
     tg_api_url = _normalize_tg_api_url(os.getenv('TG_API_URL', ''))
     builder = Application.builder().token(api_token)
-    # The default 5s connect timeout is tight when a proxy or a Worker sits in
-    # front of the API; a slow hop should not look like an outage.
-    builder = (builder
-               .connect_timeout(20.0)
-               .read_timeout(30.0)
-               .write_timeout(30.0)
-               .pool_timeout(10.0))
+
     # A host may publish IPv6 that this server cannot actually reach; the client
     # then picks v6 and hangs until the connect timeout. Decide once, at start.
     force_ipv4_env = os.getenv('TELEGRAM_FORCE_IPV4', '').strip().lower()
@@ -1750,6 +1744,9 @@ async def main():
                 f"Set TELEGRAM_FORCE_IPV4=0 to disable this check."
             )
 
+    # The default 5s connect timeout is tight when a proxy or a Worker sits in
+    # front of the API. These go either on the builder or inside the request
+    # object — python-telegram-bot rejects both at once.
     if force_ipv4:
         import httpx
         from telegram.request import HTTPXRequest
@@ -1766,6 +1763,12 @@ async def main():
 
         builder = builder.request(_ipv4_request()).get_updates_request(_ipv4_request())
         logger.info("Forcing IPv4 for Telegram API connections")
+    else:
+        builder = (builder
+                   .connect_timeout(20.0)
+                   .read_timeout(30.0)
+                   .write_timeout(30.0)
+                   .pool_timeout(10.0))
 
     api_target = 'api.telegram.org'
     if tg_api_url:
@@ -1775,7 +1778,10 @@ async def main():
         logger.info(f"Using Telegram API proxy: {base}")
     elif proxy_url:
         logger.info(f"Using proxy: {proxy_url.split('@')[-1] if '@' in proxy_url else proxy_url}")
-        builder = builder.proxy(proxy_url).get_updates_proxy(proxy_url)
+        # A custom request object already carries the proxy; setting it again
+        # on the builder is the same "two ways to say it" conflict.
+        if not force_ipv4:
+            builder = builder.proxy(proxy_url).get_updates_proxy(proxy_url)
     application = builder.build()
 
     # Initialize database tables and run migrations
