@@ -15,6 +15,7 @@ import os
 import datetime
 import re
 import signal
+import socket
 import gettext
 import json
 import hmac
@@ -1651,6 +1652,40 @@ async def shutdown(application, loop):
     await asyncio.gather(*tasks, return_exceptions=True)
     loop.stop()
 
+def _ipv6_advertised_but_dead(host: str, port: int = 443, timeout: float = 3.0) -> bool:
+    """True when the host offers IPv6 but a connection over it does not work.
+
+    That combination is what hangs a client: the resolver hands back an AAAA
+    record, the client prefers it, and the packets go nowhere.
+    """
+    try:
+        infos = socket.getaddrinfo(host, port, socket.AF_INET6, socket.SOCK_STREAM)
+    except socket.gaierror:
+        return False          # no IPv6 offered at all — nothing to avoid
+    if not infos:
+        return False
+    for info in infos[:2]:
+        # Creating the socket can fail outright on a host built without IPv6
+        # ("Address family not supported"), which counts as unreachable.
+        try:
+            sock = socket.socket(socket.AF_INET6, socket.SOCK_STREAM)
+        except OSError:
+            break
+        sock.settimeout(timeout)
+        try:
+            sock.connect(info[4])
+            return False      # IPv6 works, leave the client alone
+        except OSError:
+            continue
+        finally:
+            sock.close()
+    # IPv6 is advertised and none of it answers — only worth avoiding if v4 works
+    try:
+        return bool(socket.getaddrinfo(host, port, socket.AF_INET, socket.SOCK_STREAM))
+    except socket.gaierror:
+        return False
+
+
 async def on_error(update, context):
     """Report network hiccups as one line instead of a wall of stack trace.
 
@@ -1699,10 +1734,23 @@ async def main():
                .read_timeout(30.0)
                .write_timeout(30.0)
                .pool_timeout(10.0))
-    # Some hosts publish only IPv6 for a Cloudflare Worker, and a server
-    # without working IPv6 then just hangs until the connect timeout. Binding
-    # the client to an IPv4 address forces the v4 path.
-    if os.getenv('TELEGRAM_FORCE_IPV4', '').strip().lower() in ('1', 'true', 'yes'):
+    # A host may publish IPv6 that this server cannot actually reach; the client
+    # then picks v6 and hangs until the connect timeout. Decide once, at start.
+    force_ipv4_env = os.getenv('TELEGRAM_FORCE_IPV4', '').strip().lower()
+    if force_ipv4_env in ('1', 'true', 'yes'):
+        force_ipv4 = True
+    elif force_ipv4_env in ('0', 'false', 'no'):
+        force_ipv4 = False
+    else:
+        api_host = (tg_api_url or 'https://api.telegram.org').split('://', 1)[-1].split('/')[0]
+        force_ipv4 = _ipv6_advertised_but_dead(api_host)
+        if force_ipv4:
+            logger.warning(
+                f"{api_host} publishes IPv6 this server cannot reach; using IPv4. "
+                f"Set TELEGRAM_FORCE_IPV4=0 to disable this check."
+            )
+
+    if force_ipv4:
         import httpx
         from telegram.request import HTTPXRequest
 
