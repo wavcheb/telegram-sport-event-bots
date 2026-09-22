@@ -878,8 +878,12 @@ def get_event_from_linked_chat(linked_chat_id: int, linked_platform: str) -> Opt
     return row if row else None
 
 
-def get_linked_event_users(event_id: int) -> List[Tuple[int, str, str]]:
-    """Get users from linked event. Returns [(user_id, platform, display_name), ...]."""
+def get_linked_event_users(event_id: int) -> List[Tuple[int, str, str, bool]]:
+    """Users of the linked event: [(user_id, platform, display_name, paid), ...].
+
+    The paid flag travels with them: without it each bot renders the other
+    platform's players as unpaid and their markers vanish on every redraw.
+    """
     linked_event_id = get_linked_event_id(event_id)
     if not linked_event_id:
         return []
@@ -887,7 +891,7 @@ def get_linked_event_users(event_id: int) -> List[Tuple[int, str, str]]:
     conn = reconnect()
     # Get participants with their platform info
     cur = _exec(conn, '''
-        SELECT p.user_id, e.platform, u.first_name, u.last_name, u.username
+        SELECT p.user_id, e.platform, u.first_name, u.last_name, u.username, p.paid
         FROM Participants p
         JOIN Events e ON p.event_id = e.event_id
         LEFT JOIN Users u ON p.user_id = u.user_id AND u.platform = e.platform
@@ -899,7 +903,7 @@ def get_linked_event_users(event_id: int) -> List[Tuple[int, str, str]]:
 
     result = []
     for row in rows:
-        user_id, platform, fnm, lnm, unm = row
+        user_id, platform, fnm, lnm, unm, paid = row
         fnm = fnm or ''
         lnm = lnm or ''
         unm = unm or ''
@@ -910,7 +914,7 @@ def get_linked_event_users(event_id: int) -> List[Tuple[int, str, str]]:
             name = unm
         elif not name:
             name = str(user_id)
-        result.append((user_id, platform, name))
+        result.append((user_id, platform, name, bool(paid)))
     return result
 
 # ==================== Cross-platform identity ====================
@@ -1186,7 +1190,7 @@ def get_duty_candidates(chat_id: int) -> List[Tuple[int, str, str]]:
         add(user_id, PLATFORM, compose_full_name(user_id))
     event_id = get_event_id_by_chat_id(chat_id)
     if event_id:
-        for user_id, platform, name in get_linked_event_users(event_id):
+        for user_id, platform, name, _paid in get_linked_event_users(event_id):
             add(user_id, platform, name)
     return candidates
 

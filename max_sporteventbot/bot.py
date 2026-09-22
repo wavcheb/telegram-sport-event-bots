@@ -327,28 +327,40 @@ def create_telegram_message_text(chat_id: int, payment_url: str = None) -> str:
     except:
         pass
 
+    # Duty player, matched across every account of that person
+    duty = db.get_event_duty(chat_id)
+    duty_accounts = set(
+        db.get_person_accounts(db.get_person_key(duty[0], duty[1]))
+    ) if duty else set()
+
     # Show local players (MAX)
     for n, user_id in enumerate(players, start=1):
         if players_limit and n == players_limit + 1:
             text += '\n<i>Резерв:</i>\n'
         in_squad = '+' if not players_limit or n <= players_limit else '  '
         printable_name = _escape_html(db.compose_full_name(user_id))
-        paid = db.get_payment_status(chat_id, user_id)
-        payment_mark = ' 💰' if paid else ''
+        if (user_id, db.PLATFORM) in duty_accounts:
+            payment_mark = ' 🧹'
+        else:
+            payment_mark = ' 💰' if db.get_payment_status(chat_id, user_id) else ''
         platform_mark = ' [max]'
         text += f'{in_squad} {n}. {printable_name}{payment_mark}{platform_mark}\n'
 
     # Show linked players (Telegram)
     if linked_players:
         start_n = len(players) + 1
-        for i, (user_id, platform, name) in enumerate(linked_players):
+        for i, (user_id, platform, name, paid) in enumerate(linked_players):
             n = start_n + i
             if players_limit and n == players_limit + 1:
                 text += '\n<i>Резерв:</i>\n'
             in_squad = '+' if not players_limit or n <= players_limit else '  '
             safe_name = _escape_html(name)
+            if (user_id, platform) in duty_accounts:
+                payment_mark = ' 🧹'
+            else:
+                payment_mark = ' 💰' if paid else ''
             platform_mark = f' [{_escape_html(platform)}]' if platform != 'max' else ' [max]'
-            text += f'{in_squad} {n}. {safe_name}{platform_mark}\n'
+            text += f'{in_squad} {n}. {safe_name}{payment_mark}{platform_mark}\n'
 
     # Cancelled applications with strikethrough
     canceled_players = db.get_event_revoked_users(chat_id) or []
@@ -494,15 +506,18 @@ def create_event_full_text(this_chat_id: int, payment_url: str = None, closed: s
     # Show linked players
     if linked_players:
         start_n = len(players) + 1
-        for i, (user_id, platform, name) in enumerate(linked_players):
+        for i, (user_id, platform, name, paid) in enumerate(linked_players):
             n = start_n + i
             if players_limit and n == players_limit + 1:
                 text_players += '\n<i>Резерв:</i>\n'
             in_squad = '+' if not players_limit or n <= players_limit else '  '
             safe_name = _escape_html(name)
             platform_mark = f' [{_escape_html(platform)}]'
-            duty_mark = ' 🧹 [дежурный]' if (user_id, platform) in duty_accounts else ''
-            text_players += f'{in_squad} {n}. {_wrap_closed(safe_name + platform_mark + duty_mark)}\n'
+            if (user_id, platform) in duty_accounts:
+                status_mark = ' 🧹 [дежурный]'
+            else:
+                status_mark = ' [оплачено]' if paid else ''
+            text_players += f'{in_squad} {n}. {_wrap_closed(safe_name + platform_mark + status_mark)}\n'
 
     text += text_players
     total_players = len(players) + len(linked_players)
