@@ -48,14 +48,52 @@ if (!$event_id) {
     die('Event not found. Use ?event=ID or ?chat=CHAT_ID');
 }
 
-// Signed links: with a shared secret configured, only links the bots produced
-// open, so the page cannot be walked by editing ?event=.
-if (defined('PAYMENTS_SECRET') && PAYMENTS_SECRET !== '') {
-    $expected = substr(hash_hmac('sha256', (string)$event_id, PAYMENTS_SECRET), 0, 16);
+// Signed links. Each chat has its own signing key, so a link given to one
+// group cannot be edited into another group's event — the signature would have
+// to come from a key that group never sees. A chat without a key yet (nothing
+// generated a link since the upgrade) stays open, as before.
+$event_chat_ids = [];
+$stmt = $pdo->prepare('
+    SELECT DISTINCT chat_id FROM Events
+    WHERE event_id = ?
+       OR event_id IN (SELECT event_id_2 FROM EventLinks WHERE event_id_1 = ?)
+       OR event_id IN (SELECT event_id_1 FROM EventLinks WHERE event_id_2 = ?)
+');
+$stmt->execute([$event_id, $event_id, $event_id]);
+while ($r = $stmt->fetch(PDO::FETCH_ASSOC)) {
+    if ($r['chat_id'] !== null) {
+        $event_chat_ids[] = (int)$r['chat_id'];
+    }
+}
+
+$page_secrets = [];
+if ($event_chat_ids) {
+    try {
+        $ph = implode(',', array_fill(0, count($event_chat_ids), '?'));
+        $stmt = $pdo->prepare("SELECT page_secret FROM Chats
+                               WHERE chat_id IN ($ph) AND page_secret IS NOT NULL AND page_secret <> ''");
+        $stmt->execute($event_chat_ids);
+        while ($r = $stmt->fetch(PDO::FETCH_ASSOC)) {
+            $page_secrets[] = $r['page_secret'];
+        }
+    } catch (PDOException $e) {
+        // page_secret column may not exist yet on older deployments
+    }
+}
+
+if ($page_secrets) {
     $given = isset($_GET['t']) ? (string)$_GET['t'] : '';
-    if (!hash_equals($expected, $given)) {
+    $accepted = false;
+    foreach ($page_secrets as $secret) {
+        $expected = substr(hash_hmac('sha256', (string)$event_id, $secret), 0, 16);
+        if (hash_equals($expected, $given)) {
+            $accepted = true;
+            break;
+        }
+    }
+    if (!$accepted) {
         http_response_code(403);
-        die('Link is invalid or has expired. Ask the bot for a fresh one with /payments.');
+        die('Link is invalid. Ask your bot for a fresh one with /info or /payments.');
     }
 }
 

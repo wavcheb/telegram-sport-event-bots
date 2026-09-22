@@ -211,10 +211,17 @@ currencies, so one sign is enough.
 The payments page also shows that balance and a duty table for a period —
 4 weeks by default, switchable with the 2/4/8/12 links or `?weeks=`.
 
-Links to the page can be signed: set the same `PAYMENTS_SECRET` in both bots'
-`.env` and in `web/config.php`, and the page stops opening for a guessed
-`?event=`. It stops enumeration, it is not a password: whoever holds a link can
-read that event.
+Links to the page are signed automatically with a key that belongs to the chat
+(generated with the first link and kept in `Chats.page_secret`). When several
+teams share the bots, one group's link therefore cannot be edited into another
+group's event — the signature would have to come from a key they never see.
+Nothing to configure.
+
+This stops `?event=` from being guessed; it is not a password, so whoever holds
+the link itself can read that event. If a link reaches the wrong person, rotate
+the chat's key with `UPDATE Chats SET page_secret = NULL WHERE chat_id = ...;`
+— every earlier link for that chat stops working and the next command hands out
+a fresh one.
 
 ### Cross-Platform Chat Linking
 
@@ -237,6 +244,7 @@ The bot uses MySQL with 13 tables:
 - **EventLinks**: Cross-platform event links
 - **Duty**: Duty roster — who is on duty (and plays free) at each event
 - **Bank**: Treasurer's balance history (`/event_bank`)
+- **Chats.page_secret**: Per-chat key signing that chat's payments-page links
 - **UserLinks / UserLinkCodes**: Accounts of the same person across messengers
 
 ## 🌍 Supported Languages

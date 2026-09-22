@@ -101,6 +101,7 @@ def create_table_chats():
             latest_event_id BIGINT DEFAULT 0,
             latest_bot_message_id VARCHAR(64) DEFAULT '',
             latest_bot_message_text TEXT,
+            page_secret VARCHAR(64) DEFAULT NULL,
             extra1 TEXT,
             extra2 TEXT,
             extra3 TEXT,
@@ -1282,6 +1283,37 @@ def _primary_key_columns(conn, table: str) -> List[str]:
         return []
 
 
+def get_or_create_page_secret(chat_id: int) -> str:
+    """Per-chat key for signing payments-page links.
+
+    One key per chat, not one per installation: several groups share these
+    bots, and a link from one group must not open another group's event.
+    Generated on first use and kept in Chats.page_secret.
+    """
+    conn = reconnect()
+    try:
+        cur = _exec(conn, '''
+            SELECT page_secret FROM Chats WHERE chat_id = %s AND platform = %s LIMIT 1;
+        ''', (chat_id, PLATFORM))
+        row = cur.fetchone()
+        if row and row[0]:
+            return str(row[0])
+
+        import secrets as _secrets
+        secret = _secrets.token_hex(16)
+        _exec(conn, '''
+            INSERT INTO Chats (chat_id, platform, page_secret) VALUES (%s, %s, %s)
+            ON DUPLICATE KEY UPDATE page_secret = VALUES(page_secret);
+        ''', (chat_id, PLATFORM, secret))
+        conn.commit()
+        return secret
+    except Exception as e:
+        logger.error(f"Could not read or create the page secret for chat {chat_id}: {e}")
+        return ''
+    finally:
+        conn.close()
+
+
 # ==================== Community bank ====================
 
 
@@ -1347,6 +1379,7 @@ def get_bank_amount(chat_id: int):
 def _migrate_add_columns(conn):
     """Columns that were added after the first release."""
     added_columns = [
+        ('Chats', 'page_secret', 'VARCHAR(64) DEFAULT NULL'),
         ('Participants', 'paid_at', 'DATETIME DEFAULT NULL'),
         ('Participants', 'invited_by', 'BIGINT DEFAULT NULL'),
         ('Events', 'payment_url', 'TEXT DEFAULT NULL'),

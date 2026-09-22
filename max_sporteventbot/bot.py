@@ -115,23 +115,24 @@ BOT_DIR = os.path.dirname(os.path.abspath(__file__))
 # Payments page URL from environment
 PAYMENTS_PAGE_URL = os.getenv('PAYMENTS_PAGE_URL', '').strip()
 
-# Signing key shared with the payments page (config.php). When set, event
-# links carry an HMAC so the page cannot be browsed by guessing event ids.
-PAYMENTS_SECRET = os.getenv('PAYMENTS_SECRET', '').strip()
-
 # Shown next to the kitty balance. A single sign is enough — the bots
 # never convert between currencies.
 BANK_CURRENCY = os.getenv('BANK_CURRENCY', '₽').strip()
 
 
-def payments_page_link(event_id: int) -> str:
-    """Link to the payments page for an event, signed when a secret is set."""
+def payments_page_link(event_id: int, chat_id: int) -> str:
+    """Link to the payments page, signed with this chat's own key.
+
+    The key is per chat, so a link handed to one group cannot be edited into
+    another group's event: their signatures come from different keys.
+    """
     if not PAYMENTS_PAGE_URL:
         return ''
     link = f'{PAYMENTS_PAGE_URL}?event={event_id}'
-    if PAYMENTS_SECRET:
+    secret = db.get_or_create_page_secret(chat_id)
+    if secret:
         token = hmac.new(
-            PAYMENTS_SECRET.encode('utf-8'), str(event_id).encode('utf-8'), hashlib.sha256
+            secret.encode('utf-8'), str(event_id).encode('utf-8'), hashlib.sha256
         ).hexdigest()[:16]
         link += f'&t={token}'
     return link
@@ -333,7 +334,7 @@ def create_telegram_message_text(chat_id: int, payment_url: str = None) -> str:
         try:
             event_id = db.get_event_id_by_chat_id(chat_id)
             primary_event_id = db.get_primary_event_id(event_id)
-            payments_link = payments_page_link(primary_event_id)
+            payments_link = payments_page_link(primary_event_id, chat_id)
             links.append(f'<a href="{_escape_html(payments_link)}">📊 Текущие платежи</a>')
         except:
             pass
@@ -484,7 +485,7 @@ def create_event_full_text(this_chat_id: int, payment_url: str = None, closed: s
             event_id = db.get_event_id_by_chat_id(this_chat_id)
             # Use primary (original) event_id for linked events
             primary_event_id = db.get_primary_event_id(event_id)
-            payments_link = payments_page_link(primary_event_id)
+            payments_link = payments_page_link(primary_event_id, this_chat_id)
             links.append(f'<a href="{_escape_html(payments_link)}">📊 Текущие платежи</a>')
         except:
             pass
