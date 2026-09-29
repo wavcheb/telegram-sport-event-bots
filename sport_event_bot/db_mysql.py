@@ -1505,9 +1505,46 @@ def _migrate_clear_cross_platform_ids(conn):
         logger.warning(f"Could not clear cross-platform message ids: {e}")
 
 
+def _migrate_text_charset(conn):
+    """Make sure text columns can hold emoji.
+
+    A table created as latin1 (or utf8, which in MySQL is only 3 bytes) stores
+    a 4-byte emoji as "?" — the announcement then comes back from the database
+    with its icons replaced. Converting is a no-op once done.
+    """
+    for table in ('Chats', 'Events', 'Users', 'Bank'):
+        try:
+            cur = _exec(conn, '''
+                SELECT CCSA.character_set_name
+                FROM information_schema.TABLES T
+                JOIN information_schema.COLLATION_CHARACTER_SET_APPLICABILITY CCSA
+                  ON CCSA.collation_name = T.table_collation
+                WHERE T.table_schema = DATABASE() AND T.table_name = %s
+            ''', (table,))
+            row = cur.fetchone()
+        except Exception as e:
+            logger.warning(f"Could not read charset of {table}: {e}")
+            continue
+        current = (row[0] if row else '') or ''
+        if current.lower() == 'utf8mb4':
+            continue
+        try:
+            _exec(conn, f'ALTER TABLE {table} CONVERT TO CHARACTER SET utf8mb4 '
+                        f'COLLATE utf8mb4_unicode_ci')
+            conn.commit()
+            logger.info(f"Migration: {table} charset {current or 'unknown'} -> utf8mb4")
+        except Exception as e:
+            logger.error(
+                f"Migration FAILED: {table} is {current or 'not utf8mb4'} and cannot hold "
+                f"emoji: {e}. Fix it by hand with: ALTER TABLE {table} CONVERT TO "
+                f"CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;"
+            )
+
+
 def migrate_schema():
     """Bring an older database up to the current schema."""
     conn = reconnect()
+    _migrate_text_charset(conn)
     _migrate_add_columns(conn)
     _migrate_column_types(conn)
     _migrate_primary_keys(conn)

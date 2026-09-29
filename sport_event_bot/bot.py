@@ -523,12 +523,31 @@ async def button(update, context):
 
     await query.answer()
 
+# Prices in an event description look like times to the date parser: "ТБанк
+# 300 р" becomes 03:00 and, being the last match, wins over the real "19:00".
+# Strip money amounts before parsing.
+# Word-like currencies need a word boundary after them; symbols (₽ ₸ $ €) do
+# not have one, so they are matched separately.
+_MONEY_RE = re.compile(
+    r'\b\d{1,7}\s*(?:'
+    r'(?:р|руб|рубл\w*|тг|тенге|грн|гривен|сом|сум|usd|eur|kzt|rub)\.?\b'
+    r'|[₽₸₴$€£]'
+    r')',
+    re.IGNORECASE | re.UNICODE,
+)
+
+
+def _strip_money(text: str) -> str:
+    """Remove "300 р" and friends so they are not read as a time."""
+    return _MONEY_RE.sub(' ', text or '')
+
+
 @logger.catch
 def parse_datetime(str_datetime_in_free_form: str, translate: Callable[[str], str]) -> Optional[datetime.datetime]:
     consts = parsedatetime.Constants(localeID=translate('en_US'), usePyICU=False)
     consts.use24 = True
     r_event = RecurringEvent(parse_constants=consts)
-    found_date = r_event.parse(str_datetime_in_free_form)
+    found_date = r_event.parse(_strip_money(str_datetime_in_free_form))
     if not found_date:
         return None
     delta = found_date - datetime.datetime.now()
