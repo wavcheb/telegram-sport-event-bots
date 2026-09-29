@@ -192,12 +192,31 @@ def _coerce_to_datetime(val: object) -> Optional[datetime.datetime]:
     return None
 
 
+# Prices in an event description look like times to the date parser: "ТБанк
+# 300 р" becomes 03:00 and, being the last match, wins over the real "19:00".
+# Strip money amounts before parsing.
+# Word-like currencies need a word boundary after them; symbols (₽ ₸ $ €) do
+# not have one, so they are matched separately.
+_MONEY_RE = re.compile(
+    r'\b\d{1,7}\s*(?:'
+    r'(?:р|руб|рубл\w*|тг|тенге|грн|гривен|сом|сум|usd|eur|kzt|rub)\.?\b'
+    r'|[₽₸₴$€£]'
+    r')',
+    re.IGNORECASE | re.UNICODE,
+)
+
+
+def _strip_money(text: str) -> str:
+    """Remove "300 р" and friends so they are not read as a time."""
+    return _MONEY_RE.sub(' ', text or '')
+
+
 def parse_datetime(str_datetime_in_free_form: str) -> Optional[datetime.datetime]:
     """Parse datetime from free-form text in Russian."""
     consts = parsedatetime.Constants(localeID='ru_RU', usePyICU=False)
     consts.use24 = True
     r_event = RecurringEvent(parse_constants=consts)
-    found_date = r_event.parse(str_datetime_in_free_form)
+    found_date = r_event.parse(_strip_money(str_datetime_in_free_form))
     if not found_date:
         return None
     delta = found_date - datetime.datetime.now()
@@ -864,12 +883,8 @@ async def cmd_event_remove(event: MessageCreated):
             logger.warning(f"Could not mark event as removed: {e}")
             # At least take the buttons off the stale announcement
             try:
-                await event.bot.edit_message(
-                    message_id=old_msg_id,
-                    text=db.get_latest_bot_message_text(chat_id) or " ",
-                    attachments=[],
-                    format=ParseMode.HTML,
-                )
+                # Buttons off, text untouched — see show_info_impl.
+                await event.bot.edit_message(message_id=old_msg_id, attachments=[])
             except Exception as e2:
                 logger.warning(f"Could not clear buttons on event_remove: {e2}")
 
@@ -953,19 +968,14 @@ async def show_info_impl(event: MessageCreated, bot=None):
 
     _bot = bot or event.bot
 
-    # Remove buttons from old message (leave text intact).
-    # format=HTML is required: the stored text contains HTML markup, and
-    # without it MAX renders the raw tags instead of formatting them.
+    # Take the buttons off the previous announcement without touching its text.
+    # Re-sending the stored copy used to mangle it: emoji come back from the
+    # database as "?" when its columns are not utf8mb4. Omitting text leaves
+    # the message exactly as MAX already has it.
     old_msg_id = db.get_latest_bot_message_id(chat_id)
-    old_msg_text = db.get_latest_bot_message_text(chat_id)
-    if old_msg_id and old_msg_text:
+    if old_msg_id:
         try:
-            await _bot.edit_message(
-                message_id=old_msg_id,
-                text=old_msg_text,
-                attachments=[],
-                format=ParseMode.HTML,
-            )
+            await _bot.edit_message(message_id=old_msg_id, attachments=[])
         except Exception as e:
             logger.info(f"Could not remove buttons from old message: {e}")
 
@@ -1096,12 +1106,8 @@ async def cmd_fix(event: MessageCreated):
             )
             # At least take the buttons off the stale announcement
             try:
-                await event.bot.edit_message(
-                    message_id=old_msg_id,
-                    text=db.get_latest_bot_message_text(chat_id) or " ",
-                    attachments=[],
-                    format=ParseMode.HTML,
-                )
+                # Buttons off, text untouched — see show_info_impl.
+                await event.bot.edit_message(message_id=old_msg_id, attachments=[])
             except Exception as e2:
                 logger.warning(f"Could not clear buttons on fix: {e2}")
 
